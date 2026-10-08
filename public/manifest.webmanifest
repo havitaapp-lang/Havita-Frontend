@@ -1,0 +1,9 @@
+{
+  "name": "Havita",
+  "short_name": "Havita",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#1849A9",
+  "theme_color": "#1849A9",
+  "icons": []
+}
