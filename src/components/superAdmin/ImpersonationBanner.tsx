@@ -2,6 +2,7 @@ import { ShieldAlert, ArrowLeft, Eye } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { useTenant } from '../../contexts/TenantContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { getBaseDomain } from '../../utils/domainUtils';
 
 export const ImpersonationBanner = () => {
   const { currentTenant } = useTenant();
@@ -14,15 +15,11 @@ export const ImpersonationBanner = () => {
   const handleExitSupportMode = () => {
     // Navigate back to the Super Admin Customer 360 view for this tenant on the global portal
     const currentHost = window.location.hostname;
-    const baseDomain = currentHost.includes('.localhost') 
-      ? '.localhost' 
-      : '.' + currentHost.split('.').slice(-2).join('.');
+    const baseDomain = getBaseDomain(currentHost);
     
     const protocol = window.location.protocol;
     const port = window.location.port ? `:${window.location.port}` : '';
-    const newHost = currentHost.includes('localhost') 
-      ? `admin.localhost` 
-      : `admin${baseDomain}`;
+    const newHost = `admin.${baseDomain}`;
 
     window.location.href = `${protocol}//${newHost}${port}/super-admin/tenants/${currentTenant.id}`;
   };

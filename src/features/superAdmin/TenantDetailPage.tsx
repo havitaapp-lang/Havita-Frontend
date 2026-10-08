@@ -30,6 +30,7 @@ import {
   COLOMBIAN_CITIES,
 } from '../../utils/formatters';
 import { sanitizeEmailInput } from '../../utils/sanitizers';
+import { getBaseDomain } from '../../utils/domainUtils';
 import type { PlatformTenant, Organization, AuditEvent } from '../../types/superAdmin';
 
 export const TenantDetailPage = () => {
@@ -167,9 +168,7 @@ export const TenantDetailPage = () => {
 
   const getTenantPortalUrl = () => {
     const currentHost = window.location.hostname;
-    const targetDomain = currentHost.includes('.localhost') || currentHost === 'localhost'
-      ? '.localhost'
-      : '.' + currentHost.split('.').slice(-2).join('.');
+    const targetDomain = `.${getBaseDomain(currentHost)}`;
     const protocol = window.location.protocol;
     const port = window.location.port ? `:${window.location.port}` : '';
     return `${protocol}//${tenant.subdomain}${targetDomain}${port}/admin`;

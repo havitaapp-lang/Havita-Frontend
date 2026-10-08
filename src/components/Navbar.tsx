@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Logo } from './Logo';
 import { ArrowRight, Menu, X } from 'lucide-react';
+import { getBaseDomain } from '../utils/domainUtils';
 
 interface NavbarProps {
   onOpenDemo?: () => void;
@@ -119,7 +120,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo }) => {
           </button>
 
           <a 
-            href={`${window.location.protocol}//admin${window.location.hostname.includes('.localhost') ? '.localhost' : window.location.hostname.endsWith('.vercel.app') && window.location.hostname.split('.').length >= 3 ? '.' + window.location.hostname.split('.').slice(-3).join('.') : '.' + window.location.hostname.split('.').slice(-2).join('.')}${window.location.port ? `:${window.location.port}` : ''}/login`}
+            href={`${window.location.protocol}//admin.${getBaseDomain(window.location.hostname)}${window.location.port ? `:${window.location.port}` : ''}/login`}
             className="flex items-center gap-1.5 text-sm font-semibold text-[#16345F] hover:text-[var(--tenant-primary)] transition-colors py-2 px-1 group"
           >
             <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
@@ -201,7 +202,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo }) => {
               Solicitar una demo
             </button>
             <a 
-              href={`${window.location.protocol}//admin${window.location.hostname.includes('.localhost') ? '.localhost' : window.location.hostname.endsWith('.vercel.app') && window.location.hostname.split('.').length >= 3 ? '.' + window.location.hostname.split('.').slice(-3).join('.') : '.' + window.location.hostname.split('.').slice(-2).join('.')}${window.location.port ? `:${window.location.port}` : ''}/login`}
+              href={`${window.location.protocol}//admin.${getBaseDomain(window.location.hostname)}${window.location.port ? `:${window.location.port}` : ''}/login`}
               onClick={() => setMobileMenuOpen(false)}
               className="w-full py-2.5 rounded-full border border-slate-200 text-slate-700 font-semibold text-sm text-center flex items-center justify-center gap-2"
             >
