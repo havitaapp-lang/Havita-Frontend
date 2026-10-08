@@ -12,23 +12,46 @@ interface TenantContextProps {
 
 const TenantContext = createContext<TenantContextProps | undefined>(undefined);
 
+// Helper to extract subdomain from hostname
+export const getSubdomainFromHost = (): string | null => {
+  const host = window.location.hostname.toLowerCase();
+  
+  // Localhost specific rules
+  if (host.includes('.havita.localhost')) {
+    const parts = host.split('.havita.localhost')[0];
+    if (parts && parts !== 'www' && parts !== 'app') return parts;
+    return null;
+  } else if (host.endsWith('.localhost')) {
+    const parts = host.replace('.localhost', '');
+    if (parts && parts !== 'www' && parts !== 'app') return parts;
+    return null;
+  }
+  
+  // Vercel deployment specifically for testing
+  if (host.endsWith('.vercel.app')) {
+    const parts = host.split('.');
+    // If it's just havita-frontend.vercel.app, length is 3. That is the base domain.
+    // So tenant subdomains would be tenant.havita-frontend.vercel.app (length 4)
+    if (parts.length > 3) {
+      const sub = parts[0];
+      if (sub && sub !== 'www' && sub !== 'app') return sub;
+    }
+    return null;
+  }
+
+  // Production domain (e.g. havita.com or whatever)
+  // Assuming a 2-part base domain like example.com
+  const parts = host.split('.');
+  if (parts.length > 2) {
+    const sub = parts[0];
+    if (sub && sub !== 'www' && sub !== 'app') return sub;
+  }
+  return null;
+};
+
 export const TenantProvider = ({ children }: { children: ReactNode }) => {
   const [availableTenants, setAvailableTenants] = useState<Tenant[]>([]);
   const [isResolving, setIsResolving] = useState(true);
-
-  // Helper to extract subdomain from hostname
-  const getSubdomainFromHost = (): string | null => {
-    const host = window.location.hostname.toLowerCase();
-    // Support formats: [subdomain].havita.localhost or [subdomain].localhost
-    if (host.includes('.havita.localhost')) {
-      const parts = host.split('.havita.localhost')[0];
-      if (parts && parts !== 'www' && parts !== 'app') return parts;
-    } else if (host.endsWith('.localhost')) {
-      const parts = host.replace('.localhost', '');
-      if (parts && parts !== 'www' && parts !== 'app') return parts;
-    }
-    return null;
-  };
 
   const [currentTenant, setCurrentTenantState] = useState<Tenant | null>(null);
 
@@ -104,20 +127,26 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
     }
 
     // If the subdomain is changing, do a hard redirect to the new URL
-    const baseDomain = currentHost.includes('.localhost') 
-      ? '.localhost' 
-      : '.' + currentHost.split('.').slice(-2).join('.');
+    let baseDomain = '.' + currentHost.split('.').slice(-2).join('.');
+    if (currentHost.includes('.havita.localhost')) {
+      baseDomain = '.havita.localhost';
+    } else if (currentHost.endsWith('.localhost')) {
+      baseDomain = '.localhost';
+    } else if (currentHost.endsWith('.vercel.app')) {
+      // Keep the third part if it's there (e.g. havita-frontend.vercel.app)
+      const parts = currentHost.split('.');
+      if (parts.length >= 3) {
+        baseDomain = '.' + parts.slice(-3).join('.');
+      } else {
+        baseDomain = '.vercel.app';
+      }
+    }
     
     // Determine target URL
     const protocol = window.location.protocol;
     const port = window.location.port ? `:${window.location.port}` : '';
     
-    let targetDomain = baseDomain;
-    if (currentHost.endsWith('.localhost')) {
-      targetDomain = '.localhost';
-    }
-    
-    const newHost = `${tenant.subdomain}${targetDomain}`;
+    const newHost = `${tenant.subdomain}${baseDomain}`;
     
     // Preserve the current path and query string so they land on the same page
     const currentPath = window.location.pathname + window.location.search;

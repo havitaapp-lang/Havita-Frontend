@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { ResidentRegistrationPage } from '../features/auth/ResidentRegistrationPage';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Building2, Home } from 'lucide-react';
-import { TenantProvider, useTenant } from '../contexts/TenantContext';
+import { TenantProvider, useTenant, getSubdomainFromHost } from '../contexts/TenantContext';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { DataProvider } from '../contexts/DataContext';
 
@@ -109,7 +109,7 @@ const AppContent = () => {
   
   const host = window.location.hostname;
   const isGlobalAdmin = host.startsWith('admin') || host.startsWith('super');
-  const hasSubdomain = host.split('.').length > (host.includes('localhost') ? 1 : 2);
+  const hasSubdomain = !!getSubdomainFromHost();
   
   if (!isResolving && hasSubdomain && !isGlobalAdmin && !currentTenant) {
     return (
@@ -127,7 +127,7 @@ const AppContent = () => {
           
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <a 
-              href={`${window.location.protocol}//${host.includes('localhost') ? 'localhost' : host.split('.').slice(-2).join('.')}${window.location.port ? ':' + window.location.port : ''}/`}
+              href={`${window.location.protocol}//${host.includes('.localhost') ? 'localhost' : host.endsWith('.vercel.app') && host.split('.').length >= 3 ? host.split('.').slice(-3).join('.') : host.split('.').slice(-2).join('.')}${window.location.port ? ':' + window.location.port : ''}/`}
               className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors shadow-sm cursor-pointer"
             >
               <Home className="w-4 h-4" />
