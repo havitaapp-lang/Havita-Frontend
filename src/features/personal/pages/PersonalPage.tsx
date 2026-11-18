@@ -17,6 +17,7 @@ import { AdminAttendancePage } from './AdminAttendancePage';
 import { AddPersonalModal } from '../components/AddPersonalModal';
 import { ManageAccessModal } from '../components/ManageAccessModal';
 import { notificationService } from '../../../services/notificationService';
+import { statusLabelFor } from '../../../utils/statusLabels';
 
 export const PersonalPage = () => {
   const [activeTab, setActiveTab] = useState<'personal' | 'shifts' | 'attendance'>('personal');
@@ -53,12 +54,27 @@ export const PersonalPage = () => {
   }, [loadData]);
 
   const handleToggleStatus = async (member: PersonalMember) => {
-    const nextStatus = member.status === 'ACTIVO' ? 'SUSPENDIDO' : 'ACTIVO';
-    await personalService.updateStatus(member.id, nextStatus);
-    notificationService.showToast(
-      `${member.firstName} ${member.lastName} ahora está ${nextStatus}`,
-      nextStatus === 'ACTIVO' ? 'success' : 'info'
-    );
+    const nextStatus = member.status === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO';
+    const name = `${member.firstName} ${member.lastName}`;
+    if (nextStatus === 'INACTIVO') {
+      const confirmed = await notificationService.showConfirm(
+        '¿Desactivar colaborador?',
+        `${name} perderá de inmediato el acceso al sistema en esta comunidad.`,
+        'Sí, desactivar',
+        'Cancelar'
+      );
+      if (!confirmed) return;
+    }
+    try {
+      const confirmedStatus = await personalService.updateStatus(member.id, nextStatus);
+      notificationService.showToast(
+        `${name} ahora está ${statusLabelFor('staff', confirmedStatus).toLowerCase()}`,
+        confirmedStatus === 'ACTIVO' ? 'success' : 'info'
+      );
+    } catch (err) {
+      const message = (err as { data?: { message?: string } })?.data?.message;
+      notificationService.showError('No se pudo cambiar el estado', message || 'Inténtalo de nuevo en unos segundos.');
+    }
     loadData();
   };
 
@@ -215,7 +231,6 @@ export const PersonalPage = () => {
               >
                 <option value="ALL">Todos los Estados</option>
                 <option value="ACTIVO">Activos</option>
-                <option value="SUSPENDIDO">Suspendidos</option>
                 <option value="INACTIVO">Inactivos</option>
               </select>
             </div>

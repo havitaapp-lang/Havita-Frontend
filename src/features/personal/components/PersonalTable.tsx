@@ -1,6 +1,7 @@
 import { Eye, ShieldCheck, CheckCircle, AlertTriangle, KeyRound } from 'lucide-react';
 import type { PersonalMember } from '../types/personal.types';
 import { useNavigate } from 'react-router-dom';
+import { statusLabelFor } from '../../../utils/statusLabels';
 
 interface PersonalTableProps {
   members: PersonalMember[];
@@ -114,7 +115,7 @@ export const PersonalTable: React.FC<PersonalTableProps> = ({
                     <div className="space-y-1">
                       <div className="flex items-center gap-1.5">
                         <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-black text-[10px] border border-emerald-200">
-                          {m.systemAccess.role}
+                          {statusLabelFor('staffRole', m.systemAccess.role)}
                         </span>
                         {m.systemAccess.role === 'PORTERÍA' && (
                           <span
@@ -139,7 +140,7 @@ export const PersonalTable: React.FC<PersonalTableProps> = ({
                 <td className="py-3.5 px-3">
                   <span
                     className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-                      m.status === 'ACTIVO'
+                      (m.status === 'ACTIVO' || (m.status as string) === 'ACTIVE')
                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                         : m.status === 'SUSPENDIDO'
                         ? 'bg-rose-50 text-rose-700 border border-rose-200'
@@ -148,14 +149,14 @@ export const PersonalTable: React.FC<PersonalTableProps> = ({
                   >
                     <span
                       className={`w-1.5 h-1.5 rounded-full ${
-                        m.status === 'ACTIVO'
+                        (m.status === 'ACTIVO' || (m.status as string) === 'ACTIVE')
                           ? 'bg-emerald-500'
                           : m.status === 'SUSPENDIDO'
                           ? 'bg-rose-500'
                           : 'bg-slate-400'
                       }`}
                     />
-                    {m.status}
+                    {statusLabelFor('staff', m.status)}
                   </span>
                 </td>
 
@@ -189,7 +190,8 @@ export const PersonalTable: React.FC<PersonalTableProps> = ({
                           ? 'hover:bg-rose-50 text-slate-500 hover:text-rose-600'
                           : 'hover:bg-emerald-50 text-slate-500 hover:text-emerald-600'
                       }`}
-                      title={m.status === 'ACTIVO' ? 'Suspender o desactivar' : 'Reactivar'}
+                      title={m.status === 'ACTIVO' ? 'Desactivar (quita el acceso al sistema)' : 'Activar'}
+                      aria-label={m.status === 'ACTIVO' ? 'Desactivar' : 'Activar'}
                     >
                       {m.status === 'ACTIVO' ? (
                         <AlertTriangle className="w-4 h-4" />

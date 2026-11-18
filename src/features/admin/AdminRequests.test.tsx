@@ -31,8 +31,8 @@ beforeEach(() => {
     propertyUuid: 'unit-101', residentId: 'res-ana',
   }];
   data.properties = [
-    { id: 'unit-101', tenantId: 'tenant-1', name: 'Torre 1 - 101' },
-    { id: 'unit-102', tenantId: 'tenant-1', name: 'Torre 1 - 102' },
+    { id: 'unit-101', tenantId: 'tenant-1', name: 'Torre 1 - 101', number: '101', structureName: 'Torre 1', level: 1, status: 'OCCUPIED', path: 'Torre 1 -> Piso 1 -> 101' },
+    { id: 'unit-102', tenantId: 'tenant-1', name: 'Torre 1 - 102', number: '102', structureName: 'Torre 1', level: 1, status: 'OCCUPIED', path: 'Torre 1 -> Piso 1 -> 102' },
   ];
   data.residents = [
     { id: 'res-ana', propertyUuid: 'unit-101', name: 'Ana Sintética', type: 'Propietario', status: 'ACTIVE' },
@@ -87,6 +87,12 @@ describe('AdminRequests — Resolver', () => {
 describe('AdminRequests — Crear y editar', () => {
   const fill = (id: string, value: string) =>
     fireEvent.change(document.getElementById(id) as HTMLElement, { target: { value } });
+  // Selector torre -> piso -> apartamento (el mismo de portería).
+  const pickUnit = (number: string) => {
+    fireEvent.click(screen.getByText('Seleccionar unidad'));
+    fireEvent.click(screen.getByText('Torre 1'));
+    fireEvent.click(screen.getByText(number));
+  };
 
   it('crear: solo ofrece residentes ACTIVOS de la unidad elegida y envía los UUID al servidor', async () => {
     data.createPQRS.mockResolvedValue({});
@@ -95,7 +101,8 @@ describe('AdminRequests — Crear y editar', () => {
 
     const resident = document.getElementById('admin-req-resident') as HTMLSelectElement;
     expect(resident.disabled).toBe(true);
-    fill('admin-req-property', 'unit-101');
+    pickUnit('101');
+    expect(screen.getByText('Torre 1 -> Piso 1 -> 101')).toBeTruthy();
     const options = Array.from(resident.options).map(o => o.textContent);
     expect(options).toEqual(['Sin solicitante (administración)', 'Ana Sintética (Propietario)']);
 
@@ -115,7 +122,7 @@ describe('AdminRequests — Crear y editar', () => {
     data.createPQRS.mockRejectedValue({ data: { message: 'El residente indicado no pertenece a la unidad seleccionada.' } });
     render(<AdminRequests />);
     fireEvent.click(screen.getByText('Nueva Solicitud'));
-    fill('admin-req-property', 'unit-102');
+    pickUnit('102');
     fill('admin-req-title', 'Ruido en la noche');
     fill('admin-req-description', 'Música alta después de las 11 pm');
     fireEvent.click(screen.getByText('Registrar Solicitud'));

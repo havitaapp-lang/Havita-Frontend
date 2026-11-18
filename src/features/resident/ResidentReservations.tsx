@@ -112,7 +112,7 @@ export const ResidentReservations = () => {
   // Fase 2 / E2: única fuente de unidad (sin la cadena de fallbacks que acababa en la primera unidad).
   const { activeUnitId: activePropertyId, activeLabel } = useActiveUnit();
   const { currentTenant } = useTenant();
-  const { reservations, createReservation, deleteReservation, changeReservationStatus, commonZones } = useData();
+  const { reservations, createReservation, changeReservationStatus, commonZones } = useData();
   const queryClient = useQueryClient();
 
   const myPropertyUUID = activePropertyId || '';
@@ -313,9 +313,14 @@ export const ResidentReservations = () => {
     );
 
     if (confirmed) {
-      await changeReservationStatus(id, 'Cancelada', 'Cancelada por el residente');
-      await queryClient.invalidateQueries({ queryKey: ['reservations'] });
-      notificationService.showToast('Reserva cancelada correctamente', 'success');
+      try {
+        await changeReservationStatus(id, 'Cancelada', 'Cancelada por el residente');
+        await queryClient.invalidateQueries({ queryKey: ['reservations'] });
+        notificationService.showToast('Reserva cancelada correctamente', 'success');
+      } catch (err) {
+        const message = (err as { data?: { message?: string } })?.data?.message;
+        notificationService.showError('No se pudo cancelar', message || 'Inténtalo de nuevo en unos segundos.');
+      }
     }
   };
 

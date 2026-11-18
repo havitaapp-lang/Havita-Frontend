@@ -13,6 +13,7 @@ import {
 import { assemblyService } from '../services/assemblyService';
 import type { Assembly } from '../types/assembly.types';
 import { CreateAssemblyModal } from '../components/CreateAssemblyModal';
+import { statusLabelFor } from '../../../utils/statusLabels';
 
 export const AssembliesPage = () => {
   const navigate = useNavigate();
@@ -126,7 +127,7 @@ export const AssembliesPage = () => {
                         : 'bg-blue-50 text-blue-700 border border-blue-200'
                     }`}
                   >
-                    {assemb.status === 'IN_PROGRESS' ? '🔴 EN CURSO' : assemb.status}
+                    {assemb.status === 'IN_PROGRESS' ? '🔴 EN CURSO' : statusLabelFor('assembly', assemb.status)}
                   </span>
 
                   <span className="text-xs text-slate-400 font-mono flex items-center gap-1">

@@ -44,9 +44,12 @@ export interface SystemAccess {
   enabled: boolean;
   username: string; // Puede ser el correo o nombre para retrocompatibilidad
   loginEmail?: string;
+  /** Solo para enviarla al crear la cuenta: el API nunca la devuelve y no se guarda en el navegador. */
   password?: string;
   role: SystemRole;
   status: 'ACTIVO' | 'INACTIVO';
+  /** La cuenta también tiene acceso en otra comunidad: su correo y su contraseña solo los cambia su titular. */
+  shared?: boolean;
   assignedGate?: GateAssignment;
   lastLoginAt?: string;
   createdAt?: string;

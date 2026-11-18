@@ -54,7 +54,8 @@ interface DataContextType {
 
   createVisitor: (visitor: Omit<Visitor, "id">) => Promise<any>;
   createGroupVisit: (_visitDetails: any, _persons: any[]) => Promise<Visitor[]>;
-  updateVisitor: (id: string, visitor: Partial<Visitor>) => void;
+  /** Guarda en el servidor (residente: su endpoint; administración y portería: el del personal). Lanza el error si falla. */
+  updateVisitor: (id: string, visitor: Partial<Visitor>) => Promise<void>;
   deleteVisitor: (id: string) => Promise<void> | void;
   recordVisitorEntry: (id: string) => void;
   recordGroupEntry: (_groupId: string) => void;
@@ -70,9 +71,12 @@ interface DataContextType {
   resolvePQRS: (id: string, notes?: string) => Promise<void>;
 
   createReservation: (resv: Omit<Reservation, "id">) => Promise<Reservation>;
-  updateReservation: (id: string, resv: Partial<Reservation>) => void;
-  deleteReservation: (id: string) => void;
-  changeReservationStatus: (id: string, status: Reservation["status"], notes?: string) => void;
+  /**
+   * Confirma, rechaza o cancela en el servidor (acepta el valor interno CONFIRMED/REJECTED/CANCELLED o su etiqueta).
+   * Lanza el error si el servidor lo rechaza: la lista solo cambia si se confirma. (El backend no permite editar
+   * ni borrar reservas.)
+   */
+  changeReservationStatus: (id: string, status: Reservation["status"], notes?: string) => Promise<void>;
 
   createCommunication: (comm: Omit<Communication, "id" | "createdAt">) => Promise<Communication>;
   updateCommunication: (id: string, comm: Partial<Communication>) => Promise<void>;
@@ -1071,22 +1075,29 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return createdVisitors;
   };
 
+  // Antes la administración y portería solo cambiaban la pantalla, y un error del residente se ignoraba.
   const updateVisitor = async (id: string, visitor: Partial<Visitor>) => {
-    setVisitors(prev => prev.map(v => v.id === id ? { ...v, ...visitor, expectedAt: formatFriendlyDateTime(visitor.expectedAt) || v.expectedAt } : v));
     if (isResident) {
-      try {
-        await visitorService.updateMyVisitor(id, {
-          name: visitor.name,
-          documentId: visitor.documentId,
-          vehiclePlate: visitor.vehiclePlate || undefined,
-          expectedAt: visitor.expectedAt,
-          observations: visitor.observations || undefined,
-          visitPurpose: visitor.visitPurpose || undefined,
-        });
-      } catch (err) {
-        console.warn("Error al sincronizar actualización de visita en backend:", err);
-      }
+      await visitorService.updateMyVisitor(id, {
+        name: visitor.name,
+        documentId: visitor.documentId,
+        vehiclePlate: visitor.vehiclePlate || undefined,
+        expectedAt: visitor.expectedAt,
+        observations: visitor.observations || undefined,
+        visitPurpose: visitor.visitPurpose || undefined,
+      });
+      setVisitors(prev => prev.map(v => v.id === id ? { ...v, ...visitor, expectedAt: formatFriendlyDateTime(visitor.expectedAt) || v.expectedAt } : v));
+      return;
     }
+    const saved = await visitorService.updateStaffVisitor(id, {
+      name: visitor.name || '',
+      documentId: visitor.documentId || '',
+      vehiclePlate: visitor.vehiclePlate || undefined,
+      observations: visitor.observations || undefined,
+    });
+    setVisitors(prev => prev.map(v => v.id === id
+      ? { ...v, name: saved.name, documentId: saved.documentId, vehiclePlate: saved.vehiclePlate, observations: saved.observations }
+      : v));
   };
 
   const deleteVisitor = async (id: string) => {
@@ -1095,12 +1106,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await visitorService.deleteMyVisitor(id);
       setVisitors(prev => prev.map(v => v.id === id ? { ...v, status: 'CANCELLED' } : v));
     } else {
+      // Solo se marca cancelada si el servidor lo confirma (antes se daba por hecho aunque fallara).
+      await apiClient.delete(`/access/visitors/${id}`);
       setVisitors(prev => prev.map(v => v.id === id ? { ...v, status: 'CANCELLED' } : v));
-      try {
-        await apiClient.delete(`/access/visitors/${id}`);
-      } catch (err) {
-        console.warn("No se pudo cancelar visita en backend:", err);
-      }
     }
   };
   const recordVisitorEntry = async (id: string) => {
@@ -1228,49 +1236,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       throw err;
     }
   };
-  const updateReservation = async (id: string, resv: Partial<Reservation>) => {
-    try {
-      // NOTA: El endpoint puede variar según el backend, pero asumiremos PUT /reservations/{id}
-      await apiClient.put(`/reservations/${id}`, resv);
-      setReservations(prev => prev.map(r => r.id === id ? { ...r, ...resv } : r));
-      queryClient.invalidateQueries({ queryKey: ['reservations'] });
-    } catch (err) {
-      console.error("Error al actualizar reserva en el backend:", err);
-      setReservations(prev => prev.map(r => r.id === id ? { ...r, ...resv } : r));
-      queryClient.invalidateQueries({ queryKey: ['reservations'] });
-    }
-  };
-  const deleteReservation = async (id: string) => {
-    try {
-      await apiClient.delete(`/reservations/${id}`);
-      setReservations(prev => prev.filter(r => r.id !== id));
-      queryClient.invalidateQueries({ queryKey: ['reservations'] });
-    } catch (err) {
-      console.error("Error al eliminar reserva en el backend:", err);
-      setReservations(prev => prev.filter(r => r.id !== id));
-      queryClient.invalidateQueries({ queryKey: ['reservations'] });
-    }
-  };
   const changeReservationStatus = async (id: string, status: Reservation["status"], notes?: string) => {
-    try {
-      if (status === 'Confirmada') {
-        const query = notes ? `?notes=${encodeURIComponent(notes)}` : '';
-        await apiClient.post(`/reservations/${id}/confirm${query}`);
-      } else if (status === 'Cancelada' || status === 'Rechazada') {
-        const endpoint = status === 'Rechazada' ? 'reject' : 'cancel';
-        const query = notes ? `?notes=${encodeURIComponent(notes)}` : '';
-        await apiClient.post(`/reservations/${id}/${endpoint}${query}`);
-      }
-      setReservations(prev => prev.map(r => r.id === id ? { ...r, status, adminNotes: notes ?? r.adminNotes } : r));
-      queryClient.invalidateQueries({ queryKey: ['reservations'] });
-    } catch (err) {
-      console.error("Error al cambiar estado de reserva en el backend:", err);
-      // Fallback a actualización local si el backend falla
-      setReservations(prev => prev.map(r => r.id === id ? { ...r, status, adminNotes: notes ?? r.adminNotes } : r));
-      queryClient.invalidateQueries({ queryKey: ['reservations'] });
-    }
+    // Antes: llamaba a PUT/DELETE /reservations/{id}, que no existen, y si el servidor fallaba daba el cambio por bueno.
+    const key = String(status || '').toUpperCase().trim();
+    const action = ({
+      CONFIRMED: 'confirm', CONFIRMADA: 'confirm',
+      REJECTED: 'reject', RECHAZADA: 'reject',
+      CANCELLED: 'cancel', CANCELED: 'cancel', CANCELADA: 'cancel',
+    } as Record<string, string>)[key];
+    if (!action) throw new Error(`Cambio de estado no permitido: ${status}`);
+    const query = notes ? `?notes=${encodeURIComponent(notes)}` : '';
+    const res = await apiClient.post<any>(`/reservations/${id}/${action}${query}`);
+    setReservations(prev => prev.map(r => r.id === id
+      ? { ...r, status: res?.status || r.status, adminNotes: res?.adminNotes ?? notes ?? r.adminNotes }
+      : r));
+    queryClient.invalidateQueries({ queryKey: ['reservations'] });
   };
-
   const createCommunication = async (comm: Omit<Communication, "id" | "createdAt">) => {
     const newComm = { ...comm, id: Date.now().toString(), createdAt: new Date().toISOString() } as Communication;
     setCommunications(prev => [newComm, ...prev]);
@@ -1385,8 +1366,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         deletePQRS,
         resolvePQRS,
         createReservation,
-        updateReservation,
-        deleteReservation,
         changeReservationStatus,
         createCommunication,
         updateCommunication,

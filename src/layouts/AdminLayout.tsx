@@ -54,7 +54,7 @@ export const AdminLayout = () => {
   }
 
   const allNavItems = [
-    { name: 'Dashboard', path: '/admin', icon: <Building2 className="w-5 h-5" /> },
+    { name: 'Inicio', path: '/admin', icon: <Building2 className="w-5 h-5" /> },
     { name: 'Residentes', path: '/admin/residents', icon: <Users className="w-5 h-5" /> },
     { name: 'Propiedades', path: '/admin/properties', icon: <Home className="w-5 h-5" /> },
     { name: 'Personal', path: '/admin/staff', icon: <UserCheck className="w-5 h-5" />, feature: 'staff' },

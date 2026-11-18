@@ -3,6 +3,67 @@ import { shiftService } from './shiftService';
 import { attendanceService } from './attendanceService';
 import { apiClient } from '../../../api/apiClient';
 
+/**
+ * El backend envía StaffMemberStatus (ACTIVE / INACTIVE) y el módulo trabaja con sus códigos (ACTIVO / INACTIVO), igual
+ * que turnos y asistencia. Antes llegaba ACTIVE tal cual: el filtro «Activos» no coincidía y los colores fallaban. El
+ * estado no se envía nunca al backend desde este servicio.
+ */
+export function staffStatusFromBackend(status?: string): PersonalStatus {
+  switch ((status || '').toUpperCase()) {
+    case 'ACTIVE': case 'ACTIVO': return 'ACTIVO';
+    case 'INACTIVE': case 'INACTIVO': return 'INACTIVO';
+    case 'SUSPENDIDO': return 'SUSPENDIDO';
+    case 'FINALIZADO': return 'FINALIZADO';
+    // Valor desconocido: se conserva (la etiqueta lo registra como «sin traducción» en vez de ocultarlo).
+    default: return (status || 'INACTIVO') as PersonalStatus;
+  }
+}
+
+/** Acceso al sistema que devuelve el API (nunca incluye la contraseña). */
+function systemAccessFromBackend(a: any, gate?: string): SystemAccess | undefined {
+  if (!a || !a.enabled) return undefined;
+  return {
+    enabled: true,
+    username: a.loginEmail || '',
+    loginEmail: a.loginEmail || undefined,
+    role: (a.role === 'SECURITY' ? 'SECURITY' : 'STAFF') as SystemAccess['role'],
+    status: a.status === 'ACTIVE' ? 'ACTIVO' : 'INACTIVO',
+    shared: Boolean(a.shared),
+    assignedGate: (gate || undefined) as SystemAccess['assignedGate'],
+  };
+}
+
+/** Colaborador del API → modelo del módulo. */
+export function mapBackendStaff(s: any): PersonalMember {
+  return {
+    id: s.id,
+    tenantId: s.tenantId,
+    firstName: s.firstName,
+    lastName: s.lastName,
+    documentType: s.documentType,
+    documentNumber: s.documentNumber,
+    phone: s.phone,
+    email: s.email,
+    position: s.position,
+    area: s.area,
+    contractType: s.contractType,
+    company: s.company,
+    startDate: s.startDate,
+    status: staffStatusFromBackend(s.status),
+    systemAccess: systemAccessFromBackend(s.systemAccess, s.assignedGate),
+    observations: s.observations || undefined,
+    avatar: s.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(s.firstName + ' ' + s.lastName)}&background=random`,
+    lastAccessAt: 'Sin ingresos registrados',
+  } as PersonalMember;
+}
+
+/** Nunca se guarda una contraseña en el navegador (antes se guardaba en texto plano). */
+function withoutPassword(m: PersonalMember): PersonalMember {
+  if (!m?.systemAccess || !('password' in m.systemAccess)) return m;
+  const { password: _omit, ...access } = m.systemAccess;
+  return { ...m, systemAccess: access as SystemAccess };
+}
+
 const STORAGE_KEY_PERSONAL = 'havita_community_personal';
 const STORAGE_KEY_SHIFTS = 'havita_community_shifts';
 
@@ -19,14 +80,21 @@ function loadStorage<T>(key: string, fallback: T[]): T[] {
 
 function saveStorage<T>(key: string, data: T[]): void {
   try {
-    localStorage.setItem(key, JSON.stringify(data));
+    const safe = key === STORAGE_KEY_PERSONAL ? (data as unknown as PersonalMember[]).map(withoutPassword) : data;
+    localStorage.setItem(key, JSON.stringify(safe));
   } catch (err) {
     console.error('Error saving to storage:', err);
   }
 }
 
 class PersonalService {
-  private members: PersonalMember[] = loadStorage(STORAGE_KEY_PERSONAL, []);
+  // Al cargar se eliminan las contraseñas que versiones anteriores guardaron en el navegador.
+  private members: PersonalMember[] = (() => {
+    const stored = loadStorage<PersonalMember>(STORAGE_KEY_PERSONAL, []);
+    const clean = stored.map(withoutPassword);
+    if (stored.some((m) => m?.systemAccess && 'password' in m.systemAccess)) saveStorage(STORAGE_KEY_PERSONAL, clean);
+    return clean;
+  })();
   private shifts: Shift[] = loadStorage(STORAGE_KEY_SHIFTS, []);
 
   async getPersonalList(filters?: {
@@ -38,24 +106,7 @@ class PersonalService {
     try {
       const page = await apiClient.get<any>('/staff', { search: filters?.search });
       if (page && page.content) {
-        let result = page.content.map((s: any) => ({
-          id: s.id,
-          tenantId: s.tenantId,
-          firstName: s.firstName,
-          lastName: s.lastName,
-          documentType: s.documentType,
-          documentNumber: s.documentNumber,
-          phone: s.phone,
-          email: s.email,
-          position: s.position,
-          area: s.area,
-          contractType: s.contractType,
-          company: s.company,
-          startDate: s.startDate,
-          status: s.status,
-          avatar: s.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(s.firstName + ' ' + s.lastName)}&background=random`,
-          lastAccessAt: 'Sin ingresos registrados'
-        }));
+        let result = page.content.map((s: any) => mapBackendStaff(s));
         
         if (filters?.area && filters.area !== 'ALL') {
           result = result.filter((m: any) => m.area === filters.area);
@@ -104,24 +155,7 @@ class PersonalService {
     try {
       const s = await apiClient.get<any>(`/staff/${id}`);
       if (s) {
-        return {
-          id: s.id,
-          tenantId: s.tenantId,
-          firstName: s.firstName,
-          lastName: s.lastName,
-          documentType: s.documentType,
-          documentNumber: s.documentNumber,
-          phone: s.phone,
-          email: s.email,
-          position: s.position,
-          area: s.area,
-          contractType: s.contractType,
-          company: s.company,
-          startDate: s.startDate,
-          status: s.status,
-          avatar: s.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(s.firstName + ' ' + s.lastName)}&background=random`,
-          lastAccessAt: 'Sin ingresos registrados'
-        } as PersonalMember;
+        return mapBackendStaff(s);
       }
     } catch (err) {
       console.warn('Failed to fetch from API, falling back to local storage', err);
@@ -201,37 +235,60 @@ class PersonalService {
     return newMember;
   }
 
-  async updatePersonal(id: string, updates: Partial<PersonalMember>): Promise<PersonalMember | null> {
-    const index = this.members.findIndex((m) => m.id === id);
-    if (index === -1) return null;
-
-    this.members[index] = {
-      ...this.members[index],
-      ...updates,
-    };
-    saveStorage(STORAGE_KEY_PERSONAL, this.members);
-    return this.members[index];
+  /**
+   * Guarda los datos del colaborador en el SERVIDOR (PUT /staff/{id}); antes solo se guardaban en el navegador.
+   * `current` son los datos actuales: el API recibe la ficha completa. Lanza el error si el servidor lo rechaza.
+   */
+  async updatePersonal(current: PersonalMember, updates: Partial<PersonalMember>): Promise<PersonalMember> {
+    const m = { ...current, ...updates };
+    const res = await apiClient.put<any>(`/staff/${current.id}`, {
+      firstName: m.firstName,
+      lastName: m.lastName,
+      documentType: m.documentType,
+      documentNumber: m.documentNumber,
+      phone: m.phone,
+      email: m.email,
+      position: m.position,
+      area: m.area,
+      contractType: m.contractType,
+      company: m.company,
+      startDate: m.startDate,
+      assignedGate: m.systemAccess?.assignedGate ?? current.systemAccess?.assignedGate,
+      observations: m.observations,
+    });
+    return mapBackendStaff(res);
   }
 
-  async updateStatus(id: string, status: PersonalStatus): Promise<boolean> {
+  /**
+   * Activa o desactiva en el SERVIDOR (POST /staff/{id}/status). Desactivar también quita el acceso al sistema en esta
+   * comunidad. Antes solo se guardaba en el navegador: un portero «suspendido» seguía entrando. Lanza el error si el
+   * servidor lo rechaza; devuelve el estado que confirma el servidor.
+   */
+  async updateStatus(id: string, status: PersonalStatus): Promise<PersonalStatus> {
+    const res = await apiClient.post<any>(`/staff/${id}/status`, { status: status === 'ACTIVO' ? 'ACTIVE' : 'INACTIVE' });
+    const confirmed = staffStatusFromBackend(res?.status);
     const member = this.members.find((m) => m.id === id);
-    if (!member) return false;
-    member.status = status;
-    if (status === 'INACTIVO' || status === 'FINALIZADO' || status === 'SUSPENDIDO') {
-      if (member.systemAccess) {
-        member.systemAccess.status = 'INACTIVO';
-      }
+    if (member) {
+      member.status = confirmed;
+      if (member.systemAccess) member.systemAccess.status = confirmed === 'ACTIVO' ? 'ACTIVO' : 'INACTIVO';
+      saveStorage(STORAGE_KEY_PERSONAL, this.members);
     }
-    saveStorage(STORAGE_KEY_PERSONAL, this.members);
-    return true;
+    return confirmed;
   }
 
-  async updateSystemAccess(id: string, access: SystemAccess): Promise<boolean> {
-    const member = this.members.find((m) => m.id === id);
-    if (!member) return false;
-    member.systemAccess = access;
-    saveStorage(STORAGE_KEY_PERSONAL, this.members);
-    return true;
+  /**
+   * Acceso al sistema en el SERVIDOR (PUT /staff/{id}/access). Antes solo se guardaba en el navegador, contraseña
+   * incluida. La contraseña solo se envía si se escribe una nueva y nunca se guarda aquí. Lanza el error si el servidor
+   * lo rechaza.
+   */
+  async updateSystemAccess(id: string, access: { enabled: boolean; loginEmail?: string; password?: string; role: 'SECURITY' | 'STAFF' }): Promise<PersonalMember> {
+    const res = await apiClient.put<any>(`/staff/${id}/access`, {
+      enabled: access.enabled,
+      loginEmail: access.loginEmail || undefined,
+      password: access.password || undefined,
+      systemRole: access.role,
+    });
+    return mapBackendStaff(res);
   }
 
   async getShifts(): Promise<Shift[]> {

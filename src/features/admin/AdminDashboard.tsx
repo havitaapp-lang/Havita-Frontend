@@ -27,6 +27,7 @@ import { shiftService, type ShiftAlert } from '../personal/services/shiftService
 import { attendanceService } from '../personal/services/attendanceService';
 import type { TodayAttendanceKpis } from '../personal/types/personal.types';
 import { notificationService } from '../../services/notificationService';
+import { statusLabelFor } from '../../utils/statusLabels';
 
 export const AdminDashboard = () => {
   const { currentTenant } = useTenant();
@@ -444,7 +445,7 @@ export const AdminDashboard = () => {
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                   p.status === 'DELIVERED' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
                 }`}>
-                  {p.status}
+                  {statusLabelFor('package', p.status)}
                 </span>
               </div>
             ))}

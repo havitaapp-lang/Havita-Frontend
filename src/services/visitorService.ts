@@ -33,6 +33,12 @@ export const visitorService = {
     await apiClient.delete<void>(`/resident/me/visitors/${visitorId}`, unit(unitId));
   },
 
+  /** Administración y portería: datos del visitante (la unidad y el estado no cambian aquí). */
+  updateStaffVisitor: async (visitorId: string, data: { name: string; documentId: string; vehiclePlate?: string; observations?: string }): Promise<Visitor> => {
+    const res = await apiClient.put<any>(`/access/visitors/${visitorId}`, data);
+    return mapBackendVisitor(res);
+  },
+
   updateMyVisitor: async (visitorId: string, data: Partial<CreateVisitorDto>, unitId?: string | null): Promise<Visitor> => {
     const res = await apiClient.put<any>(`/resident/me/visitors/${visitorId}`, data, unit(unitId));
     return mapBackendVisitor(res);

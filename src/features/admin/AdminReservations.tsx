@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import { Search, Plus, Calendar as CalendarIcon, Edit, Trash2, X, Users, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Plus, Calendar as CalendarIcon, XCircle, X, Users, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useData } from '../../contexts/DataContext';
 import { useTenant } from '../../contexts/TenantContext';
 import type { Reservation } from '../../types';
@@ -87,7 +87,19 @@ const getStatusDotClass = (status?: string): string => {
 
 export const AdminReservations = () => {
   const { currentTenant } = useTenant();
-  const { reservations, commonZones, createReservation, updateReservation, deleteReservation, changeReservationStatus, properties } = useData();
+  const { reservations, commonZones, createReservation, changeReservationStatus, properties } = useData();
+
+  // Cambia el estado en el servidor; solo avisa del éxito si el servidor lo confirma.
+  const runStatusChange = async (id: string, status: Reservation['status'], notes: string | undefined,
+                                 okMessage: string, okType: 'success' | 'error' | 'info') => {
+    try {
+      await changeReservationStatus(id, status, notes || undefined);
+      notificationService.showToast(okMessage, okType);
+    } catch (err) {
+      const message = (err as { data?: { message?: string } })?.data?.message;
+      notificationService.showError('No se pudo actualizar la reserva', message || 'Inténtalo de nuevo en unos segundos.');
+    }
+  };
   const zonesTabRef = useRef<AdminCommonZonesTabRef>(null);
 
   const getPropertyPath = (propertyId: string) => {
@@ -115,7 +127,6 @@ export const AdminReservations = () => {
 
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingResv, setEditingResv] = useState<Reservation | null>(null);
   const [formData, setFormData] = useState({
     propertyId: tenantProperties[0]?.name || 'Torre 1 - 101',
     residentName: tenantProperties[0]?.residentName || 'Residente',
@@ -124,7 +135,7 @@ export const AdminReservations = () => {
     startTime: '13:00',
     endTime: '18:00',
     guestsCount: 15,
-    status: 'Confirmada' as Reservation['status'],
+    status: 'PENDING' as Reservation['status'],
     observations: ''
   });
 
@@ -151,7 +162,6 @@ export const AdminReservations = () => {
   );
 
   const handleOpenCreate = () => {
-    setEditingResv(null);
     setFormData({
       propertyId: tenantProperties[0]?.name || 'Torre 1 - 101',
       residentName: tenantProperties[0]?.residentName || 'Administración',
@@ -160,26 +170,8 @@ export const AdminReservations = () => {
       startTime: '14:00',
       endTime: '18:00',
       guestsCount: 12,
-      status: 'Confirmada',
+      status: 'PENDING',
       observations: ''
-    });
-    setErrors({});
-    setErrorList([]);
-    setIsModalOpen(true);
-  };
-
-  const handleOpenEdit = (resv: Reservation) => {
-    setEditingResv(resv);
-    setFormData({
-      propertyId: resv.propertyId,
-      residentName: resv.residentName,
-      zone: resv.zone,
-      date: resv.date,
-      startTime: resv.startTime,
-      endTime: resv.endTime,
-      guestsCount: resv.guestsCount || 10,
-      status: getReservationStatusLabel(resv.status) as any,
-      observations: resv.observations || ''
     });
     setErrors({});
     setErrorList([]);
@@ -248,29 +240,16 @@ export const AdminReservations = () => {
     setIsSubmitting(true);
 
     try {
-      await new Promise(r => setTimeout(r, 400));
-
-      if (editingResv) {
-        updateReservation(editingResv.id, {
-          ...normalized,
-          guestsCount: normalized.attendees,
-          residentName: formData.residentName.trim(),
-          status: formData.status,
-          observations: formData.observations ? normalizeWhitespace(formData.observations) : undefined,
-        });
-        notificationService.showToast('Reserva actualizada correctamente', 'success');
-      } else {
-        await createReservation({
-          ...normalized,
-          commonZoneId: selectedZone?.id || '',
-          guestsCount: normalized.attendees,
-          residentName: formData.residentName.trim(),
-          status: formData.status,
-          observations: formData.observations ? normalizeWhitespace(formData.observations) : undefined,
-          tenantId: currentTenant?.id || 'tenant-limonar'
-        });
-        notificationService.showToast('Reserva registrada exitosamente', 'success');
-      }
+      await createReservation({
+        ...normalized,
+        commonZoneId: selectedZone?.id || '',
+        guestsCount: normalized.attendees,
+        residentName: formData.residentName.trim(),
+        status: formData.status,
+        observations: formData.observations ? normalizeWhitespace(formData.observations) : undefined,
+        tenantId: currentTenant?.id || 'tenant-limonar'
+      });
+      notificationService.showToast('Reserva registrada exitosamente', 'success');
 
       setIsModalOpen(false);
     } catch {
@@ -280,17 +259,16 @@ export const AdminReservations = () => {
     }
   };
 
-  const handleDelete = async (id: string, zone: string) => {
+  // El backend no borra reservas: se cancelan (queda el historial y se libera el cupo).
+  const handleCancel = async (id: string, zone: string) => {
     const confirmed = await notificationService.showConfirm(
-      '¿Eliminar reserva?',
-      `¿Deseas cancelar y eliminar la reserva para ${zone}? Esta acción no se puede deshacer.`,
-      'Sí, eliminar',
-      'Cancelar'
+      '¿Cancelar reserva?',
+      `¿Deseas cancelar la reserva para ${zone}? Se liberará el cupo.`,
+      'Sí, cancelar reserva',
+      'Mantener'
     );
-
     if (confirmed) {
-      deleteReservation(id);
-      notificationService.showToast('Reserva eliminada', 'success');
+      await runStatusChange(id, 'CANCELLED', 'Cancelada por la administración', 'Reserva cancelada', 'success');
     }
   };
 
@@ -469,8 +447,7 @@ export const AdminReservations = () => {
                             'Aprobar'
                           );
                           if (notes !== null) {
-                            changeReservationStatus(resv.id, 'Confirmada', notes);
-                            notificationService.showToast('Reserva confirmada', 'success');
+                            await runStatusChange(resv.id, 'CONFIRMED', notes, 'Reserva confirmada', 'success');
                           }
                         }}
                         className="flex-1 min-h-[40px] px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
@@ -487,8 +464,7 @@ export const AdminReservations = () => {
                             'Rechazar'
                           );
                           if (notes !== null) {
-                            changeReservationStatus(resv.id, 'Rechazada', notes);
-                            notificationService.showToast('Reserva rechazada', 'error');
+                            await runStatusChange(resv.id, 'REJECTED', notes, 'Reserva rechazada', 'info');
                           }
                         }}
                         className="flex-1 min-h-[40px] px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
@@ -497,20 +473,15 @@ export const AdminReservations = () => {
                       </button>
                     </>
                   )}
-                  <button 
-                    onClick={() => handleOpenEdit(resv)}
-                    className="min-h-[40px] px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-blue-50 hover:text-blue-600 rounded-xl transition-colors flex items-center justify-center gap-1.5"
-                  >
-                    <Edit className="w-3.5 h-3.5" />
-                    Editar
-                  </button>
-                  <button 
-                    onClick={() => handleDelete(resv.id, resv.zone)}
-                    className="min-h-[40px] px-3 py-2 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition-colors flex items-center justify-center gap-1.5"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Eliminar
-                  </button>
+                  {(isPendingStatus(resv.status) || isConfirmedStatus(resv.status)) && (
+                    <button
+                      onClick={() => handleCancel(resv.id, resv.zone)}
+                      className="min-h-[40px] px-3 py-2 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      Cancelar reserva
+                    </button>
+                  )}
                 </div>
               </div>
             ))
@@ -603,8 +574,7 @@ export const AdminReservations = () => {
                                   'Aprobar'
                                 );
                                 if (notes !== null) {
-                                  changeReservationStatus(resv.id, 'Confirmada', notes);
-                                  notificationService.showToast('Reserva confirmada', 'success');
+                                  await runStatusChange(resv.id, 'CONFIRMED', notes, 'Reserva confirmada', 'success');
                                 }
                               }}
                               className="px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
@@ -620,8 +590,7 @@ export const AdminReservations = () => {
                                   'Rechazar'
                                 );
                                 if (notes !== null) {
-                                  changeReservationStatus(resv.id, 'Rechazada', notes);
-                                  notificationService.showToast('Reserva rechazada', 'error');
+                                  await runStatusChange(resv.id, 'REJECTED', notes, 'Reserva rechazada', 'info');
                                 }
                               }}
                               className="px-2.5 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
@@ -630,20 +599,16 @@ export const AdminReservations = () => {
                             </button>
                           </>
                         )}
-                        <button 
-                          onClick={() => handleOpenEdit(resv)}
-                          className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                          title="Editar"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => handleDelete(resv.id, resv.zone)}
-                          className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                          title="Eliminar"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {(isPendingStatus(resv.status) || isConfirmedStatus(resv.status)) && (
+                          <button
+                            onClick={() => handleCancel(resv.id, resv.zone)}
+                            className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="Cancelar reserva"
+                            aria-label="Cancelar reserva"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -695,7 +660,7 @@ export const AdminReservations = () => {
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4 animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="text-lg font-bold text-slate-900">
-                {editingResv ? 'Editar Reserva' : 'Nueva Reserva de Zona Común'}
+                Nueva Reserva de Zona Común
               </h3>
               <button 
                 onClick={() => !isSubmitting && setIsModalOpen(false)}
@@ -908,24 +873,6 @@ export const AdminReservations = () => {
                 </FormField>
               </div>
 
-              <FormField
-                id="admin-res-status"
-                label="Estado de reserva"
-              >
-                <select
-                  id="admin-res-status"
-                  name="status"
-                  value={getReservationStatusLabel(formData.status)}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-                  className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                >
-                  <option value="Confirmada">Confirmada</option>
-                  <option value="Pendiente">Pendiente</option>
-                  <option value="Rechazada">Rechazada</option>
-                  <option value="Cancelada">Cancelada</option>
-                </select>
-              </FormField>
-
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                 <Button 
                   type="button" 
@@ -941,7 +888,7 @@ export const AdminReservations = () => {
                   loadingText="Guardando..."
                   className="rounded-xl bg-[var(--tenant-primary)] hover:bg-blue-600 text-white"
                 >
-                  {editingResv ? 'Guardar Cambios' : 'Confirmar Reserva'}
+                  Registrar reserva
                 </SubmitButton>
               </div>
             </form>

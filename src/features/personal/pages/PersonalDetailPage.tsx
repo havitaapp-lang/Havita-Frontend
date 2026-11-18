@@ -20,6 +20,7 @@ import { personalService } from '../services/personalService';
 import type { PersonalMember, Shift, AttendanceRecord } from '../types/personal.types';
 import { ManageAccessModal } from '../components/ManageAccessModal';
 import { notificationService } from '../../../services/notificationService';
+import { statusLabelFor } from '../../../utils/statusLabels';
 
 export const PersonalDetailPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -64,12 +65,26 @@ export const PersonalDetailPage = () => {
   }
 
   const handleToggleStatus = async () => {
-    const nextStatus = member.status === 'ACTIVO' ? 'SUSPENDIDO' : 'ACTIVO';
-    await personalService.updateStatus(member.id, nextStatus);
-    notificationService.showToast(
-      `Estado actualizado a ${nextStatus}`,
-      nextStatus === 'ACTIVO' ? 'success' : 'info'
-    );
+    const nextStatus = member.status === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO';
+    if (nextStatus === 'INACTIVO') {
+      const confirmed = await notificationService.showConfirm(
+        '¿Desactivar colaborador?',
+        `${member.firstName} ${member.lastName} perderá de inmediato el acceso al sistema en esta comunidad.`,
+        'Sí, desactivar',
+        'Cancelar'
+      );
+      if (!confirmed) return;
+    }
+    try {
+      const confirmedStatus = await personalService.updateStatus(member.id, nextStatus);
+      notificationService.showToast(
+        `Estado actualizado: ${statusLabelFor('staff', confirmedStatus)}`,
+        confirmedStatus === 'ACTIVO' ? 'success' : 'info'
+      );
+    } catch (err) {
+      const message = (err as { data?: { message?: string } })?.data?.message;
+      notificationService.showError('No se pudo cambiar el estado', message || 'Inténtalo de nuevo en unos segundos.');
+    }
     loadData();
   };
 
@@ -135,12 +150,12 @@ export const PersonalDetailPage = () => {
               </h1>
               <span
                 className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                  member.status === 'ACTIVO'
+                  (member.status === 'ACTIVO' || (member.status as string) === 'ACTIVE')
                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                     : 'bg-rose-50 text-rose-700 border border-rose-200'
                 }`}
               >
-                {member.status}
+                {statusLabelFor('staff', member.status)}
               </span>
             </div>
             <p className="text-xs sm:text-sm font-bold text-slate-700 mt-0.5">
@@ -164,7 +179,7 @@ export const PersonalDetailPage = () => {
               Cuenta de Sistema Activa
             </span>
             <div className="font-black text-emerald-950 flex items-center gap-1.5">
-              <span>Rol: {member.systemAccess.role}</span>
+              <span>Rol: {statusLabelFor('staffRole', member.systemAccess.role)}</span>
               {member.systemAccess.assignedGate && (
                 <span className="text-blue-700 font-semibold">• {member.systemAccess.assignedGate}</span>
               )}
@@ -323,7 +338,7 @@ export const PersonalDetailPage = () => {
                     {s.gate && <p className="text-[10px] text-emerald-700 font-semibold">{s.gate}</p>}
                   </div>
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                    {s.status}
+                    {statusLabelFor('shift', s.status)}
                   </span>
                 </div>
               ))
@@ -351,7 +366,7 @@ export const PersonalDetailPage = () => {
                     )}
                   </div>
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                    {att.status === 'PRESENTE' ? 'A tiempo' : att.status}
+                    {statusLabelFor('attendance', att.status)}
                   </span>
                 </div>
               ))

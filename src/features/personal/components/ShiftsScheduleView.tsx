@@ -1,5 +1,6 @@
 import { Clock, ShieldCheck, UserCheck, CalendarDays } from 'lucide-react';
 import type { Shift } from '../types/personal.types';
+import { statusLabelFor } from '../../../utils/statusLabels';
 
 interface ShiftsScheduleViewProps {
   shifts: Shift[];
@@ -39,7 +40,7 @@ export const ShiftsScheduleView: React.FC<ShiftsScheduleViewProps> = ({ shifts }
                 <h4 className="font-bold text-slate-900 text-sm mt-1">{s.shiftName}</h4>
               </div>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                {s.status}
+                {statusLabelFor('shift', s.status)}
               </span>
             </div>
 

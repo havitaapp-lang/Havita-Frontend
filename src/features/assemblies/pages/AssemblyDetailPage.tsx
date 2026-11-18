@@ -21,6 +21,7 @@ import { notificationService } from '../../../services/notificationService';
 import { assemblyStatusAction } from '../utils/assemblyStatusAction';
 import { AdminProxyPanel } from '../proxies/components/AdminProxyPanel';
 import { isAssemblyProxiesEnabled } from '../proxies/featureFlags';
+import { statusLabelFor } from '../../../utils/statusLabels';
 
 export const AssemblyDetailPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -170,7 +171,7 @@ export const AssemblyDetailPage = () => {
                 {assembly.status === 'IN_PROGRESS' ? '🔴 SESIÓN EN CURSO' : 'SESIÓN FINALIZADA'}
               </span>
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                {assembly.type} • Modalidad {assembly.modality}
+                {statusLabelFor('assemblyType', assembly.type)} • Modalidad {statusLabelFor('assemblyModality', assembly.modality)}
               </span>
             </div>
 

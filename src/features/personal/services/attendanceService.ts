@@ -2,7 +2,7 @@ import type { AttendanceRecord, AttendanceStatus, TodayAttendanceKpis } from '..
 import { shiftService, getTodayDateStr } from './shiftService';
 import { apiClient } from '../../../api/apiClient';
 
-function backendAttendanceToFrontend(b: any): AttendanceRecord {
+export function backendAttendanceToFrontend(b: any): AttendanceRecord {
   const formatTimeStr = (val?: string | null): string | undefined => {
     if (!val) return undefined;
     if (val.includes('T')) {
@@ -22,8 +22,11 @@ function backendAttendanceToFrontend(b: any): AttendanceRecord {
         return 'TARDANZA';
       case 'ABSENT':
         return 'AUSENTE';
+      // Antes INCOMPLETE caía en el caso por defecto y se mostraba «A tiempo» (y contaba como presente).
+      case 'INCOMPLETE':
+        return 'INCOMPLETO';
       default:
-        return 'PRESENTE';
+        return ((st as AttendanceStatus) || 'PRESENTE');
     }
   };
 

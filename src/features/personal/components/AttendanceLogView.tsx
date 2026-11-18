@@ -1,5 +1,6 @@
 import { CheckCircle2, Clock, MapPin, ClipboardList } from 'lucide-react';
 import type { AttendanceRecord } from '../types/personal.types';
+import { statusLabelFor } from '../../../utils/statusLabels';
 
 interface AttendanceLogViewProps {
   records: AttendanceRecord[];
@@ -76,7 +77,7 @@ export const AttendanceLogView: React.FC<AttendanceLogViewProps> = ({ records })
                   <td className="py-3.5 px-3">
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
                       <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                      {r.status === 'PRESENTE' ? 'A tiempo' : r.status}
+                      {statusLabelFor('attendance', r.status)}
                     </span>
                   </td>
                   <td className="py-3.5 px-4 text-slate-500 text-[11px] max-w-xs truncate">

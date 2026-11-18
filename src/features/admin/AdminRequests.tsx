@@ -14,7 +14,9 @@ import { SubmitButton } from '../../components/ui/SubmitButton';
 import { notificationService } from '../../services/notificationService';
 import { normalizeWhitespace } from '../../utils/sanitizers';
 import { FIELD_LIMITS } from '../../validation/rules/limits';
+import { PropertySelectorModal } from '../security/components/PropertySelectorModal';
 import { pqrsApiPriority, pqrsFormPriority, type PqrsFormPriority } from '../../contexts/pqrsMapping';
+import { statusLabelFor } from '../../utils/statusLabels';
 
 const ITEMS_PER_PAGE = 8;
 
@@ -54,6 +56,13 @@ export const AdminRequests = () => {
     residentId: '',
     responseNotes: ''
   });
+
+  // Selector de unidad torre -> piso -> apartamento (el mismo de porteria y citofonia).
+  const [isUnitPickerOpen, setIsUnitPickerOpen] = useState(false);
+  const selectedUnitLabel = useMemo(() => {
+    const prop = tenantProperties.find(p => p.id === formData.propertyId);
+    return prop ? (prop.path || prop.name) : '';
+  }, [tenantProperties, formData.propertyId]);
 
   // Solicitantes posibles: residentes ACTIVOS de la unidad elegida.
   const unitResidents = useMemo(
@@ -323,7 +332,7 @@ export const AdminRequests = () => {
             >
               <option value="Todos">Todos los estados</option>
               <option value="NEW">Nueva</option>
-              <option value="IN_PROGRESS">En Proceso</option>
+              <option value="IN_PROGRESS">En proceso</option>
               <option value="RESOLVED">Resuelta</option>
             </select>
           </div>
@@ -360,7 +369,7 @@ export const AdminRequests = () => {
                       req.status === 'RESOLVED' ? 'bg-emerald-500' :
                       req.status === 'IN_PROGRESS' ? 'bg-blue-500' : 'bg-rose-500'
                     }`} />
-                    {req.status === 'NEW' ? 'Nueva' : req.status === 'IN_PROGRESS' ? 'En Proceso' : 'Resuelta'}
+                    {statusLabelFor('pqrs', req.status)}
                   </span>
                 </div>
 
@@ -484,7 +493,7 @@ export const AdminRequests = () => {
                           req.status === 'RESOLVED' ? 'bg-emerald-500' :
                           req.status === 'IN_PROGRESS' ? 'bg-blue-500' : 'bg-rose-500'
                         }`} />
-                        {req.status === 'NEW' ? 'Nueva' : req.status === 'IN_PROGRESS' ? 'En Proceso' : 'Resuelta'}
+                        {statusLabelFor('pqrs', req.status)}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
@@ -616,22 +625,18 @@ export const AdminRequests = () => {
                       {editingPQRS.propertyId || '-'}
                     </div>
                   ) : (
-                    <select
+                    <button
+                      type="button"
                       id="admin-req-property"
-                      name="propertyId"
-                      value={formData.propertyId}
-                      onChange={(e) => {
-                        setFormData({ ...formData, propertyId: e.target.value, residentId: '' });
-                        if (errors.propertyId) setErrors({ ...errors, propertyId: '' });
-                      }}
+                      onClick={() => setIsUnitPickerOpen(true)}
                       aria-invalid={Boolean(errors.propertyId)}
-                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                      className={`w-full px-3 py-2 text-left text-xs sm:text-sm rounded-xl border bg-white focus:outline-none focus:ring-2 transition-all flex items-center justify-between ${
+                        errors.propertyId ? 'border-rose-400 focus:ring-rose-200' : 'border-slate-200 focus:border-[var(--tenant-primary)] focus:ring-blue-100'
+                      } ${formData.propertyId ? 'text-slate-900' : 'text-slate-400'}`}
                     >
-                      <option value="">Selecciona la unidad</option>
-                      {tenantProperties.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
+                      <span className="truncate">{selectedUnitLabel || 'Seleccionar unidad'}</span>
+                      <ChevronRight className="w-4 h-4 shrink-0 text-slate-400" />
+                    </button>
                   )}
                 </FormField>
 
@@ -720,7 +725,7 @@ export const AdminRequests = () => {
                     className="w-full px-2.5 py-2 text-xs rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
                   >
                     <option value="NEW">Nueva</option>
-                    <option value="IN_PROGRESS">En Proceso</option>
+                    <option value="IN_PROGRESS">En proceso</option>
                     <option value="RESOLVED">Resuelta</option>
                     <option value="CLOSED">Cerrada</option>
                   </select>
@@ -808,6 +813,17 @@ export const AdminRequests = () => {
       )}
 
       {/* RESOLVE QUICK MODAL */}
+      <PropertySelectorModal
+        isOpen={isUnitPickerOpen}
+        onClose={() => setIsUnitPickerOpen(false)}
+        properties={tenantProperties}
+        onSelect={(prop) => {
+          setFormData(prev => ({ ...prev, propertyId: prop.id, residentId: '' }));
+          if (errors.propertyId) setErrors(prev => ({ ...prev, propertyId: '' }));
+          setIsUnitPickerOpen(false);
+        }}
+      />
+
       {resolveModalId && (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs"

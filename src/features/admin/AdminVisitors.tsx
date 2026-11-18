@@ -16,6 +16,7 @@ import { VisitorScheduleSettings } from './components/VisitorScheduleSettings';
 import { VisitorStaffTrail } from '../../components/visitors/VisitorStaffTrail';
 import { maskDocument, normalizeWhitespace } from '../../utils/sanitizers';
 import { FIELD_LIMITS } from '../../validation/rules/limits';
+import { statusLabelFor } from '../../utils/statusLabels';
 
 const ITEMS_PER_PAGE = 8;
 
@@ -126,17 +127,17 @@ export const AdminVisitors = () => {
     setIsSubmitting(true);
 
     try {
-      await new Promise(r => setTimeout(r, 400));
-
       if (editingVisitor) {
-        updateVisitor(editingVisitor.id, {
-          ...normalized,
-          status: formData.status,
-          expectedAt: formData.expectedAt,
+        // Solo datos del visitante: la unidad y el estado no cambian aquí (el estado tiene sus botones).
+        await updateVisitor(editingVisitor.id, {
+          name: normalized.name,
+          documentId: normalized.documentId,
+          vehiclePlate: normalized.vehiclePlate,
+          observations: normalized.observations,
         });
         notificationService.showToast('Visita actualizada correctamente', 'success');
       } else {
-        createVisitor({
+        await createVisitor({
           ...normalized,
           status: formData.status,
           expectedAt: formData.expectedAt,
@@ -146,8 +147,9 @@ export const AdminVisitors = () => {
       }
 
       setIsModalOpen(false);
-    } catch {
-      notificationService.showError('Error al guardar', 'No fue posible registrar la visita.');
+    } catch (err) {
+      const message = (err as { data?: { message?: string } })?.data?.message;
+      notificationService.showError('Error al guardar', message || 'No fue posible guardar la visita.');
     } finally {
       setIsSubmitting(false);
     }
@@ -162,8 +164,13 @@ export const AdminVisitors = () => {
     );
 
     if (confirmed) {
-      deleteVisitor(id);
-      notificationService.showToast('Registro de visita eliminado', 'success');
+      try {
+        await deleteVisitor(id);
+        notificationService.showToast('Registro de visita eliminado', 'success');
+      } catch (err) {
+        const message = (err as { data?: { message?: string } })?.data?.message;
+        notificationService.showError('No se pudo eliminar', message || 'Inténtalo de nuevo en unos segundos.');
+      }
     }
   };
 
@@ -314,7 +321,7 @@ export const AdminVisitors = () => {
 
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
                     vis.status === 'ENTERED' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                    vis.status === 'APPROVED' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                    (vis.status === 'APPROVED' || (vis.status as string) === 'AUTHORIZED') ? 'bg-blue-50 text-blue-700 border border-blue-200' :
                     vis.status === 'EXITED' ? 'bg-slate-50 text-slate-500 border border-slate-200' :
                     vis.status === 'CANCELLED' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
                     vis.status === 'EXPIRED' ? 'bg-slate-50 text-slate-500 border border-slate-200' :
@@ -322,13 +329,13 @@ export const AdminVisitors = () => {
                   }`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${
                       vis.status === 'ENTERED' ? 'bg-emerald-500' :
-                      vis.status === 'APPROVED' ? 'bg-blue-500' : 
+                      (vis.status === 'APPROVED' || (vis.status as string) === 'AUTHORIZED') ? 'bg-blue-500' : 
                       vis.status === 'EXITED' ? 'bg-slate-400' :
                       vis.status === 'CANCELLED' ? 'bg-rose-500' :
                       vis.status === 'EXPIRED' ? 'bg-slate-400' :
                       'bg-slate-400'
                     }`} />
-                    {vis.status === 'ENTERED' ? 'Adentro' : vis.status === 'APPROVED' ? 'Esperado' : vis.status === 'EXITED' ? 'Salió' : vis.status === 'EXPIRED' ? 'Expirado' : vis.status === 'PENDING' ? 'Pendiente' : vis.status === 'CANCELLED' ? 'Cancelado' : vis.status}
+                    {statusLabelFor('visitor', vis.status)}
                   </span>
                 </div>
 
@@ -443,7 +450,7 @@ export const AdminVisitors = () => {
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
                         vis.status === 'ENTERED' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                        vis.status === 'APPROVED' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                        (vis.status === 'APPROVED' || (vis.status as string) === 'AUTHORIZED') ? 'bg-blue-50 text-blue-700 border border-blue-200' :
                         vis.status === 'EXITED' ? 'bg-slate-50 text-slate-500 border border-slate-200' :
                         vis.status === 'CANCELLED' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
                         vis.status === 'EXPIRED' ? 'bg-slate-50 text-slate-500 border border-slate-200' :
@@ -451,13 +458,13 @@ export const AdminVisitors = () => {
                       }`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${
                           vis.status === 'ENTERED' ? 'bg-emerald-500' :
-                          vis.status === 'APPROVED' ? 'bg-blue-500' : 
+                          (vis.status === 'APPROVED' || (vis.status as string) === 'AUTHORIZED') ? 'bg-blue-500' : 
                           vis.status === 'EXITED' ? 'bg-slate-400' :
                           vis.status === 'CANCELLED' ? 'bg-rose-500' :
                           vis.status === 'EXPIRED' ? 'bg-slate-400' :
                           'bg-slate-400'
                         }`} />
-                        {vis.status === 'ENTERED' ? 'Adentro' : vis.status === 'APPROVED' ? 'Esperado' : vis.status === 'EXITED' ? 'Salió' : vis.status === 'EXPIRED' ? 'Expirado' : vis.status === 'PENDING' ? 'Pendiente' : vis.status === 'CANCELLED' ? 'Cancelado' : vis.status}
+                        {statusLabelFor('visitor', vis.status)}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-xs text-slate-500">
@@ -645,6 +652,7 @@ export const AdminVisitors = () => {
                   <select
                     id="admin-vis-property"
                     name="propertyId"
+                    disabled={!!editingVisitor}
                     value={formData.propertyId}
                     onChange={(e) => setFormData({ ...formData, propertyId: e.target.value })}
                     className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
@@ -655,6 +663,7 @@ export const AdminVisitors = () => {
                   </select>
                 </FormField>
 
+                {!editingVisitor && (
                 <FormField
                   id="admin-vis-status"
                   label="Estado"
@@ -671,6 +680,7 @@ export const AdminVisitors = () => {
                     <option value="EXITED">Salió</option>
                   </select>
                 </FormField>
+                )}
               </div>
 
               <FormField

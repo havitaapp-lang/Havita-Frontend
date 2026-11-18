@@ -106,8 +106,8 @@ export const CreateAssemblyModal: React.FC<CreateAssemblyModalProps> = ({
                 onChange={(e) => setType(e.target.value as AssemblyType)}
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-semibold focus:bg-white focus:border-blue-500 focus:outline-none"
               >
-                <option value="ORDINARIA">Ordinaria (Anual de Presupuesto)</option>
-                <option value="EXTRAORDINARIA">Extraordinaria (Cuota o Asunto Específico)</option>
+                <option value="ORDINARIA">Ordinaria</option>
+                <option value="EXTRAORDINARIA">Extraordinaria</option>
               </select>
             </div>
 

@@ -178,10 +178,12 @@ export const SecurityVisitors = () => {
       await new Promise(r => setTimeout(r, 400));
 
       if (editingVisitor) {
+        // Solo datos del visitante: la unidad y el estado no cambian aquí (el estado tiene sus botones).
         await updateVisitor(editingVisitor.id, {
-          ...normalized,
-          status: formData.status,
-          expectedAt: formData.expectedAt || new Date().toISOString(),
+          name: normalized.name,
+          documentId: normalized.documentId,
+          vehiclePlate: normalized.vehiclePlate,
+          observations: normalized.observations,
         });
         notificationService.showToast('Visitante actualizado correctamente', 'success');
       } else {
@@ -196,7 +198,7 @@ export const SecurityVisitors = () => {
 
       setIsModalOpen(false);
     } catch (err: any) {
-      const msg = err?.message || err?.error || 'No fue posible registrar al visitante.';
+      const msg = err?.data?.message || err?.message || err?.error || 'No fue posible guardar al visitante.';
       notificationService.showError('Error al guardar', msg);
     } finally {
       setIsSubmitting(false);
@@ -212,8 +214,13 @@ export const SecurityVisitors = () => {
     );
 
     if (confirmed) {
-      deleteVisitor(id);
-      notificationService.showToast('Registro eliminado', 'success');
+      try {
+        await deleteVisitor(id);
+        notificationService.showToast('Registro eliminado', 'success');
+      } catch (err) {
+        const message = (err as { data?: { message?: string } })?.data?.message;
+        notificationService.showError('No se pudo eliminar', message || 'Inténtalo de nuevo en unos segundos.');
+      }
     }
   };
 
@@ -705,6 +712,7 @@ export const SecurityVisitors = () => {
                 >
                   <button
                     type="button"
+                    disabled={!!editingVisitor}
                     onClick={() => setIsPropSelectorOpen(true)}
                     className="w-full px-3 py-2 text-left text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100 flex items-center justify-between"
                   >
@@ -717,6 +725,7 @@ export const SecurityVisitors = () => {
                   </button>
                 </FormField>
 
+                {!editingVisitor && (
                 <FormField
                   id="sec-vis-status"
                   label="Estado"
@@ -733,6 +742,7 @@ export const SecurityVisitors = () => {
                     <option value="EXITED">Salió</option>
                   </select>
                 </FormField>
+                )}
               </div>
 
               <FormField
