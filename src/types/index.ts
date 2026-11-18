@@ -136,6 +136,30 @@ export interface RequestPQRS {
   createdAt: string;
   updatedAt: string;
   responseNotes?: string;
+  /** UUID de la unidad (propertyId es la etiqueta visible). */
+  propertyUuid?: string;
+  /** Residente solicitante (UUID), si lo hay. */
+  residentId?: string;
+}
+
+/** Datos que la administración envía al radicar una PQRS (la unidad y el solicitante, por UUID). */
+export interface NewPQRSInput {
+  propertyUuid: string;
+  residentId?: string;
+  title: string;
+  description: string;
+  category: string;
+  priority: string;
+}
+
+/** Cambios que la administración puede editar (la unidad y el solicitante no cambian). */
+export interface PQRSChanges {
+  title: string;
+  description: string;
+  category: string;
+  priority: string;
+  status: RequestPQRS['status'];
+  responseNotes?: string;
 }
 
 export interface CommonZone {

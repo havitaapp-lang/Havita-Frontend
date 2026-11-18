@@ -14,12 +14,17 @@ import { SubmitButton } from '../../components/ui/SubmitButton';
 import { notificationService } from '../../services/notificationService';
 import { normalizeWhitespace } from '../../utils/sanitizers';
 import { FIELD_LIMITS } from '../../validation/rules/limits';
+import { pqrsApiPriority, pqrsFormPriority, type PqrsFormPriority } from '../../contexts/pqrsMapping';
 
 const ITEMS_PER_PAGE = 8;
 
+/** Mensaje de error del servidor (ApiError.data.message), si lo hay. */
+const serverMessage = (err: unknown): string | undefined =>
+  (err as { data?: { message?: string } })?.data?.message;
+
 export const AdminRequests = () => {
   const { currentTenant } = useTenant();
-  const { pqrsList, createPQRS, updatePQRS, deletePQRS, resolvePQRS, properties } = useData();
+  const { pqrsList, createPQRS, updatePQRS, deletePQRS, resolvePQRS, properties, residents } = useData();
 
   const tenantId = currentTenant?.id || 'tenant-limonar';
   const tenantPQRS = useMemo(() => {
@@ -42,12 +47,19 @@ export const AdminRequests = () => {
     title: '',
     description: '',
     category: 'Plomería' as RequestPQRS['category'],
-    priority: 'MEDIA' as 'BAJA' | 'MEDIA' | 'ALTA' | 'URGENTE',
+    priority: 'MEDIA' as PqrsFormPriority,
     status: 'NEW' as RequestPQRS['status'],
-    propertyId: tenantProperties[0]?.name || 'Torre 1 - 101',
-    residentName: tenantProperties[0]?.residentName || 'Residente',
+    // UUID de la unidad y del residente solicitante (el servidor comprueba que el residente es de esa unidad).
+    propertyId: '',
+    residentId: '',
     responseNotes: ''
   });
+
+  // Solicitantes posibles: residentes ACTIVOS de la unidad elegida.
+  const unitResidents = useMemo(
+    () => residents.filter((r: any) => r.status === 'ACTIVE' && !!formData.propertyId && r.propertyUuid === formData.propertyId),
+    [residents, formData.propertyId]
+  );
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [errorList, setErrorList] = useState<Array<{ field: string; message: string }>>([]);
@@ -83,8 +95,8 @@ export const AdminRequests = () => {
       category: 'Plomería',
       priority: 'MEDIA',
       status: 'NEW',
-      propertyId: tenantProperties[0]?.name || 'Torre 1 - 101',
-      residentName: tenantProperties[0]?.residentName || 'Residente',
+      propertyId: '',
+      residentId: '',
       responseNotes: ''
     });
     setErrors({});
@@ -98,10 +110,10 @@ export const AdminRequests = () => {
       title: req.title,
       description: req.description,
       category: req.category,
-      priority: (req.priority?.toUpperCase() as any) || 'MEDIA',
+      priority: pqrsFormPriority(req.priority),
       status: req.status,
-      propertyId: req.propertyId,
-      residentName: req.residentName,
+      propertyId: req.propertyUuid || '',
+      residentId: req.residentId || '',
       responseNotes: req.responseNotes || ''
     });
     setErrors({});
@@ -133,39 +145,33 @@ export const AdminRequests = () => {
     setIsSubmitting(true);
 
     try {
-      await new Promise(r => setTimeout(r, 400));
-
-      const priorityFormatted = (normalized.priority.charAt(0) + normalized.priority.slice(1).toLowerCase()) as any;
-
+      // Se guarda en el servidor; el modal solo se cierra si lo confirma.
+      const priority = pqrsApiPriority(normalized.priority as PqrsFormPriority);
       if (editingPQRS) {
-        updatePQRS(editingPQRS.id, {
+        await updatePQRS(editingPQRS.id, {
           title: normalized.title,
           description: normalized.description,
           category: normalized.category,
-          priority: priorityFormatted,
+          priority,
           status: formData.status,
-          propertyId: normalized.propertyId,
-          residentName: formData.residentName.trim(),
           responseNotes: formData.responseNotes ? normalizeWhitespace(formData.responseNotes) : undefined,
         });
         notificationService.showToast('Solicitud actualizada correctamente', 'success');
       } else {
-        createPQRS({
+        await createPQRS({
+          propertyUuid: normalized.propertyId,
+          residentId: formData.residentId || undefined,
           title: normalized.title,
           description: normalized.description,
           category: normalized.category,
-          priority: priorityFormatted,
-          status: formData.status,
-          propertyId: normalized.propertyId,
-          residentName: formData.residentName.trim(),
-          tenantId: currentTenant?.id || 'tenant-limonar'
+          priority,
         });
         notificationService.showToast('Solicitud registrada exitosamente', 'success');
       }
 
       setIsModalOpen(false);
-    } catch {
-      notificationService.showError('Error al guardar', 'No fue posible guardar la solicitud.');
+    } catch (err) {
+      notificationService.showError('Error al guardar', serverMessage(err) || 'No fue posible guardar la solicitud.');
     } finally {
       setIsSubmitting(false);
     }
@@ -182,11 +188,13 @@ export const AdminRequests = () => {
 
     setIsResolving(true);
     try {
-      await new Promise(r => setTimeout(r, 300));
-      resolvePQRS(resolveModalId, normalizeWhitespace(resolveNotes));
+      // Se guarda en el servidor; el modal solo se cierra si lo confirma.
+      await resolvePQRS(resolveModalId, normalizeWhitespace(resolveNotes));
       notificationService.showToast('Caso marcado como resuelto', 'success');
       setResolveModalId(null);
       setResolveNotes('');
+    } catch (err) {
+      notificationService.showError('No se pudo resolver', serverMessage(err) || 'Inténtalo de nuevo en unos segundos.');
     } finally {
       setIsResolving(false);
     }
@@ -201,8 +209,12 @@ export const AdminRequests = () => {
     );
 
     if (confirmed) {
-      deletePQRS(id);
-      notificationService.showToast('Reporte eliminado', 'success');
+      try {
+        await deletePQRS(id);
+        notificationService.showToast('Reporte eliminado', 'success');
+      } catch (err) {
+        notificationService.showError('No se pudo eliminar', serverMessage(err) || 'Inténtalo de nuevo en unos segundos.');
+      }
     }
   };
 
@@ -598,34 +610,55 @@ export const AdminRequests = () => {
                   required
                   error={errors.propertyId}
                 >
-                  <select
-                    id="admin-req-property"
-                    name="propertyId"
-                    value={formData.propertyId}
-                    onChange={(e) => setFormData({ ...formData, propertyId: e.target.value })}
-                    className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  >
-                    {properties.map(p => (
-                      <option key={p.id} value={p.name}>{p.name}</option>
-                    ))}
-                  </select>
+                  {editingPQRS ? (
+                    // La unidad y el solicitante no se cambian al editar.
+                    <div id="admin-req-property" className="px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-100 bg-slate-50 text-slate-700">
+                      {editingPQRS.propertyId || '-'}
+                    </div>
+                  ) : (
+                    <select
+                      id="admin-req-property"
+                      name="propertyId"
+                      value={formData.propertyId}
+                      onChange={(e) => {
+                        setFormData({ ...formData, propertyId: e.target.value, residentId: '' });
+                        if (errors.propertyId) setErrors({ ...errors, propertyId: '' });
+                      }}
+                      aria-invalid={Boolean(errors.propertyId)}
+                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    >
+                      <option value="">Selecciona la unidad</option>
+                      {tenantProperties.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  )}
                 </FormField>
 
                 <FormField
                   id="admin-req-resident"
-                  label="Nombre del solicitante"
-                  maxLength={FIELD_LIMITS.NAME_MAX_LENGTH}
-                  currentLength={formData.residentName.length}
+                  label="Solicitante"
+                  helperText={!editingPQRS && formData.propertyId && unitResidents.length === 0 ? 'La unidad no tiene residentes activos.' : undefined}
                 >
-                  <input
-                    id="admin-req-resident"
-                    name="residentName"
-                    type="text"
-                    maxLength={FIELD_LIMITS.NAME_MAX_LENGTH}
-                    value={formData.residentName}
-                    onChange={(e) => setFormData({ ...formData, residentName: e.target.value })}
-                    className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  />
+                  {editingPQRS ? (
+                    <div id="admin-req-resident" className="px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-100 bg-slate-50 text-slate-700">
+                      {editingPQRS.residentName || 'Administración'}
+                    </div>
+                  ) : (
+                    <select
+                      id="admin-req-resident"
+                      name="residentId"
+                      value={formData.residentId}
+                      disabled={!formData.propertyId}
+                      onChange={(e) => setFormData({ ...formData, residentId: e.target.value })}
+                      className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400"
+                    >
+                      <option value="">Sin solicitante (administración)</option>
+                      {unitResidents.map((r: any) => (
+                        <option key={r.id} value={r.id}>{r.name} ({r.type})</option>
+                      ))}
+                    </select>
+                  )}
                 </FormField>
               </div>
 
@@ -674,6 +707,7 @@ export const AdminRequests = () => {
                   </select>
                 </FormField>
 
+                {editingPQRS && (
                 <FormField
                   id="admin-req-status"
                   label="Estado"
@@ -688,8 +722,10 @@ export const AdminRequests = () => {
                     <option value="NEW">Nueva</option>
                     <option value="IN_PROGRESS">En Proceso</option>
                     <option value="RESOLVED">Resuelta</option>
+                    <option value="CLOSED">Cerrada</option>
                   </select>
                 </FormField>
+                )}
               </div>
 
               <FormField

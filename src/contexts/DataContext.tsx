@@ -4,8 +4,10 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import type { 
   Resident, PropertyUnit, Package, Visitor, 
-  RequestPQRS, Reservation, Communication, CommunityDocument, CommonZone, PanicAlert, AlertType 
+  RequestPQRS, Reservation, Communication, CommunityDocument, CommonZone, PanicAlert, AlertType,
+  NewPQRSInput, PQRSChanges
 } from "../types";
+import { mapPqrsFromApi } from "./pqrsMapping";
 import { apiClient } from "../api/apiClient";
 import { useAuth } from "./AuthContext";
 import { useTenant } from "./TenantContext";
@@ -58,10 +60,14 @@ interface DataContextType {
   recordGroupEntry: (_groupId: string) => void;
   recordVisitorExit: (id: string) => void;
 
-  createPQRS: (req: Omit<RequestPQRS, "id" | "createdAt" | "updatedAt">) => RequestPQRS;
-  updatePQRS: (id: string, req: Partial<RequestPQRS>) => void;
-  deletePQRS: (id: string) => void;
-  resolvePQRS: (id: string, notes?: string) => void;
+  /** Radica en el servidor; lanza el error si lo rechaza. */
+  createPQRS: (req: NewPQRSInput) => Promise<RequestPQRS>;
+  /** Guarda los cambios en el servidor; lanza el error si lo rechaza. */
+  updatePQRS: (id: string, req: PQRSChanges) => Promise<void>;
+  /** Elimina en el servidor; lanza el error si lo rechaza (la lista solo cambia si se confirma). */
+  deletePQRS: (id: string) => Promise<void>;
+  /** Resuelve en el servidor con la nota de la solución; lanza el error si lo rechaza. */
+  resolvePQRS: (id: string, notes?: string) => Promise<void>;
 
   createReservation: (resv: Omit<Reservation, "id">) => Promise<Reservation>;
   updateReservation: (id: string, resv: Partial<Reservation>) => void;
@@ -668,19 +674,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         try {
           const pqrsRes = await apiClient.get<any>("/pqrs", { size: 100 });
           if (isMounted && pqrsRes?.content) {
-            const mappedPqrs: RequestPQRS[] = pqrsRes.content.map((item: any) => ({
-              id: item.id,
-              tenantId: item.tenantId || tenantId,
-              propertyId: item.propertyNumber || item.propertyId || "",
-              category: item.category || "Mantenimiento",
-              priority: item.priority || "MEDIUM",
-              status: item.status || "PENDING",
-              subject: item.subject || "Solicitud de mantenimiento",
-              description: item.description,
-              createdAt: item.createdAt ? item.createdAt.split("T")[0] : new Date().toISOString().split("T")[0],
-              updatedAt: item.updatedAt ? item.updatedAt.split("T")[0] : new Date().toISOString().split("T")[0],
-              responseNotes: item.responseNotes,
-            }));
+            const mappedPqrs: RequestPQRS[] = pqrsRes.content.map((item: any) => mapPqrsFromApi(item, tenantId));
             setPqrsList(mappedPqrs);
           }
         } catch (e) {
@@ -1129,19 +1123,36 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const createPQRS = (req: Omit<RequestPQRS, "id" | "createdAt" | "updatedAt">) => {
-    const newReq = { ...req, id: Date.now().toString(), createdAt: "Hoy", updatedAt: "Hoy" } as RequestPQRS;
-    setPqrsList(prev => [newReq, ...prev]);
-    return newReq;
+  // Antes crear y editar solo cambiaban la lista en pantalla y se perdían al recargar.
+  const createPQRS = async (req: NewPQRSInput) => {
+    const res = await apiClient.post<any>("/pqrs", {
+      propertyId: req.propertyUuid,
+      residentId: req.residentId || null,
+      title: req.title,
+      description: req.description,
+      category: req.category,
+      priority: req.priority,
+    });
+    const created = mapPqrsFromApi(res, tenantId);
+    setPqrsList(prev => [created, ...prev.filter(p => p.id !== created.id)]);
+    return created;
   };
-  const updatePQRS = (id: string, req: Partial<RequestPQRS>) => {
-    setPqrsList(prev => prev.map(p => p.id === id ? { ...p, ...req } : p));
+  const updatePQRS = async (id: string, req: PQRSChanges) => {
+    const res = await apiClient.put<any>(`/pqrs/${id}`, req);
+    const updated = mapPqrsFromApi(res, tenantId);
+    setPqrsList(prev => prev.map(p => p.id === id ? updated : p));
   };
-  const deletePQRS = (id: string) => {
+  // Antes solo cambiaban la lista en pantalla: al recargar, la PQRS volvía a su estado anterior.
+  const deletePQRS = async (id: string) => {
+    await apiClient.delete(`/pqrs/${id}`);
     setPqrsList(prev => prev.filter(p => p.id !== id));
   };
-  const resolvePQRS = (id: string, notes?: string) => {
-    setPqrsList(prev => prev.map(p => p.id === id ? { ...p, status: "RESOLVED", responseNotes: notes } : p));
+  const resolvePQRS = async (id: string, notes?: string) => {
+    const res = await apiClient.post<any>(`/pqrs/${id}/resolve`, { responseNotes: notes });
+    const resolved = res?.id ? mapPqrsFromApi(res, tenantId) : null;
+    setPqrsList(prev => prev.map(p => p.id === id
+      ? (resolved || { ...p, status: "RESOLVED", responseNotes: notes })
+      : p));
   };
 
   const createReservation = async (resv: Omit<Reservation, "id">) => {

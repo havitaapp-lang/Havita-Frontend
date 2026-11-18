@@ -26,6 +26,7 @@ import type { Poll } from '../assemblies/types/assembly.types';
 import { shiftService, type ShiftAlert } from '../personal/services/shiftService';
 import { attendanceService } from '../personal/services/attendanceService';
 import type { TodayAttendanceKpis } from '../personal/types/personal.types';
+import { notificationService } from '../../services/notificationService';
 
 export const AdminDashboard = () => {
   const { currentTenant } = useTenant();
@@ -389,7 +390,11 @@ export const AdminDashboard = () => {
                   <div className="text-[11px] text-slate-500 flex items-center justify-between">
                     <span>{item.propertyId} · {item.residentName}</span>
                     <button
-                      onClick={() => resolvePQRS(item.id, 'Resuelto con éxito')}
+                      onClick={() => {
+                        resolvePQRS(item.id, 'Resuelto con éxito')
+                          .then(() => notificationService.showToast('Caso marcado como resuelto', 'success'))
+                          .catch(() => notificationService.showError('No se pudo resolver', 'Inténtalo de nuevo en unos segundos.'));
+                      }}
                       className="text-[var(--tenant-primary)] hover:underline font-semibold text-[11px]"
                     >
                       Resolver
