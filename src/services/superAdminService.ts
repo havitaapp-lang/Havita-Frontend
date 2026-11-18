@@ -20,6 +20,17 @@ import type {
 } from '../types/superAdmin';
 import { planService } from './planService';
 
+/** Correo del usuario con sesión iniciada (autor del evento de auditoría local); vacío si no se puede leer. */
+const currentActorEmail = (): string => {
+  try {
+    const saved = localStorage.getItem('havita_user');
+    const email = saved ? JSON.parse(saved)?.email : '';
+    return typeof email === 'string' ? email : '';
+  } catch {
+    return '';
+  }
+};
+
 const DEFAULT_TENANT_FEATURES = [
   'visitors',
   'packages',
@@ -686,7 +697,7 @@ class SuperAdminService {
       id: `audit-${Date.now()}`,
       timestamp: new Date().toLocaleString('es-CO'),
       actorName: 'Super Administrador Global',
-      actorEmail: 'xsebaspc5@gmail.com',
+      actorEmail: currentActorEmail(),
       actorRole: 'SUPER_ADMIN',
       action,
       resource,

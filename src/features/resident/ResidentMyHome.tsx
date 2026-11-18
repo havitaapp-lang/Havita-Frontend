@@ -181,8 +181,7 @@ export const ResidentMyHome = () => {
   const tenantResidents = activePeople.filter((p: any) => 
     p.type === 'Residente' && (
       p.parentType === 'Arrendatario' || 
-      (tenant && p.parentResidentId === tenant.id) ||
-      (p.email && p.email.toLowerCase() === 'xsebaspc9@gmail.com')
+      (tenant && p.parentResidentId === tenant.id)
     )
   );
 
