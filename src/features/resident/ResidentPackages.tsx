@@ -3,22 +3,15 @@ import { useState } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Package as PackageIcon, CheckCircle2, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useData } from '../../contexts/DataContext';
-import { useAuth } from '../../contexts/AuthContext';
+import { useActiveUnit } from '../../hooks/useActiveUnit';
 import { notificationService } from '../../services/notificationService';
 import { FIELD_LIMITS } from '../../validation/rules/limits';
 
 export const ResidentPackages = () => {
-  const { user, activePropertyId, userProperties } = useAuth() as any;
-  const { packages, markPackageDelivered } = useData();
-  const activeProperty = userProperties?.find((prop: any) => prop.propertyId === activePropertyId);
-  const myPackages = packages.filter(p => {
-    if (activePropertyId && (p.propertyId === activePropertyId)) return true;
-    if (activeProperty?.number && (p.propertyId === activeProperty.number || (p as any).propertyNumber === activeProperty.number)) return true;
-    if (activeProperty?.name && (p.propertyId === activeProperty.name || (p as any).propertyName === activeProperty.name)) return true;
-    if (!activePropertyId && user?.residentPropertyId && p.propertyId === user.residentPropertyId) return true;
-    if (!activePropertyId && user?.propertyUnit && (p.propertyId === user.propertyUnit || (p as any).propertyNumber === user.propertyUnit)) return true;
-    return false;
-  });
+  // Fase 2 / E2: solo paquetes de la unidad activa, por id (ya no por número o nombre, que se repiten entre torres).
+  const { activeUnitId } = useActiveUnit();
+  const { packages, confirmPackagePickup } = useData();
+  const myPackages = packages.filter(p => !!activeUnitId && p.propertyId === activeUnitId);
 
   const [tab, setTab] = useState<'Pendientes' | 'Historial'>('Pendientes');
   const [searchTerm, setSearchTerm] = useState('');
@@ -46,8 +39,14 @@ export const ResidentPackages = () => {
     );
 
     if (confirmed) {
-      markPackageDelivered(id);
-      notificationService.showToast('Entrega confirmada', 'success');
+      // Solo se muestra como entregado si el servidor lo confirma (antes se ignoraba el rechazo y al recargar volvía).
+      try {
+        await confirmPackagePickup(id);
+        notificationService.showToast('Entrega confirmada', 'success');
+      } catch (err) {
+        const message = (err as { data?: { message?: string } })?.data?.message;
+        notificationService.showToast(message || 'No se pudo confirmar la entrega. Inténtalo de nuevo.', 'error');
+      }
     }
   };
 

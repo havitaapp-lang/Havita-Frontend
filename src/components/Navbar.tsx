@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Logo } from './Logo';
-import { ArrowRight, Menu, X } from 'lucide-react';
-import { getBaseDomain } from '../utils/domainUtils';
+import { Menu, X } from 'lucide-react';
 
 interface NavbarProps {
   onOpenDemo?: () => void;
@@ -32,6 +31,15 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo }) => {
     }
   };
 
+  const navItems = [
+    { id: 'dual-platform', label: 'Plataforma' },
+    { id: 'modules', label: 'Módulos' },
+    { id: 'how-it-works', label: 'Cómo funciona' },
+    { id: 'pricing', label: 'Precios' },
+    { id: 'pioneer-program', label: 'Programa Pioneros' },
+    { id: 'faq', label: 'Preguntas' },
+  ];
+
   return (
     <header 
       className={`sticky top-0 z-40 w-full transition-all duration-200 ${
@@ -43,12 +51,19 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo }) => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
         
         {/* Left: Logo */}
-        <Link to="/" className="flex items-center hover:opacity-95 transition-opacity">
+        <Link 
+          to="/" 
+          onClick={() => {
+            setActiveSection('inicio');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className="flex items-center hover:opacity-95 transition-opacity cursor-pointer"
+        >
           <Logo size="md" />
         </Link>
 
         {/* Center: Desktop Navigation Links */}
-        <nav className="hidden lg:flex items-center gap-8">
+        <nav className="hidden lg:flex items-center gap-7">
           <button 
             onClick={() => {
               setActiveSection('inicio');
@@ -60,86 +75,60 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo }) => {
           >
             Inicio
             {activeSection === 'inicio' && (
-              <span className="absolute bottom-0 left-0 w-full h-0.5 bg-[var(--tenant-primary)] rounded-full" />
+              <span className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-600 rounded-full" />
             )}
           </button>
 
-          <button 
-            onClick={() => scrollToSection('features')}
-            className={`text-sm font-medium transition-colors hover:text-slate-900 ${
-              activeSection === 'features' ? 'text-[var(--tenant-primary)] font-semibold' : 'text-slate-600'
-            }`}
-          >
-            Características
-          </button>
-
-          <button 
-            onClick={() => scrollToSection('modules')}
-            className={`text-sm font-medium transition-colors hover:text-slate-900 ${
-              activeSection === 'modules' ? 'text-[var(--tenant-primary)] font-semibold' : 'text-slate-600'
-            }`}
-          >
-            Módulos
-          </button>
-
-          <button 
-            onClick={() => scrollToSection('pricing')}
-            className={`text-sm font-medium transition-colors hover:text-slate-900 ${
-              activeSection === 'pricing' ? 'text-[var(--tenant-primary)] font-semibold' : 'text-slate-600'
-            }`}
-          >
-            Precios
-          </button>
-
-          <button 
-            onClick={() => scrollToSection('social-proof')}
-            className={`text-sm font-medium transition-colors hover:text-slate-900 ${
-              activeSection === 'social-proof' ? 'text-[var(--tenant-primary)] font-semibold' : 'text-slate-600'
-            }`}
-          >
-            Casos de éxito
-          </button>
-
-          <button 
-            onClick={() => scrollToSection('faq')}
-            className={`text-sm font-medium transition-colors hover:text-slate-900 ${
-              activeSection === 'faq' ? 'text-[var(--tenant-primary)] font-semibold' : 'text-slate-600'
-            }`}
-          >
-            Preguntas frecuentes
-          </button>
+          {navItems.map((item) => (
+            <button 
+              key={item.id}
+              onClick={() => scrollToSection(item.id)}
+              className={`text-sm font-medium transition-colors hover:text-slate-900 relative py-1 ${
+                activeSection === item.id ? 'text-blue-600 font-semibold' : 'text-slate-600'
+              }`}
+            >
+              {item.label}
+              {activeSection === item.id && (
+                <span className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-600 rounded-full" />
+              )}
+            </button>
+          ))}
         </nav>
 
         {/* Right: Actions */}
-        <div className="hidden sm:flex items-center gap-5">
+        <div className="hidden sm:flex items-center gap-3">
+          <Link
+            to="/login"
+            className="px-4 py-2 rounded-full border border-slate-200/90 hover:border-slate-300 hover:bg-slate-50 text-slate-700 hover:text-slate-900 text-sm font-semibold transition-all cursor-pointer"
+          >
+            Ingresar a mi conjunto
+          </Link>
           <button
-            onClick={onOpenDemo}
-            className="px-6 py-2.5 rounded-full bg-[var(--tenant-primary)] hover:bg-blue-600 active:bg-blue-700 text-white text-sm font-semibold shadow-md shadow-blue-500/20 hover:shadow-lg hover:shadow-blue-500/30 transition-all transform hover:-translate-y-0.5"
+            onClick={() => onOpenDemo?.()}
+            className="px-6 py-2.5 rounded-full bg-[#16345F] hover:bg-blue-700 active:bg-blue-800 text-white text-sm font-semibold shadow-md shadow-blue-900/10 hover:shadow-lg transition-all transform hover:-translate-y-0.5 cursor-pointer"
           >
-            Solicitar una demo
+            Solicitar demo
           </button>
-
-          <a 
-            href={`${window.location.protocol}//admin.${getBaseDomain(window.location.hostname)}${window.location.port ? `:${window.location.port}` : ''}/login`}
-            className="flex items-center gap-1.5 text-sm font-semibold text-[#16345F] hover:text-[var(--tenant-primary)] transition-colors py-2 px-1 group"
-          >
-            <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
-            <span>Iniciar sesión</span>
-          </a>
         </div>
 
         {/* Mobile menu trigger button */}
         <div className="flex sm:hidden items-center gap-2">
+          <Link
+            to="/login"
+            className="px-3 py-1.5 rounded-full border border-slate-200 text-slate-700 text-xs font-semibold"
+          >
+            Ingresar
+          </Link>
           <button
-            onClick={onOpenDemo}
-            className="px-3.5 py-1.5 rounded-full bg-[var(--tenant-primary)] text-white text-xs font-semibold shadow-sm"
+            onClick={() => onOpenDemo?.()}
+            className="px-3.5 py-1.5 rounded-full bg-[#16345F] text-white text-xs font-semibold shadow-sm"
           >
             Demo
           </button>
-          <button
+          <button 
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-            aria-label="Abrir menú"
+            className="p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+            aria-label="Abrir menú de navegación"
           >
             {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
@@ -149,65 +138,45 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenDemo }) => {
 
       {/* Mobile Drawer */}
       {mobileMenuOpen && (
-        <div className="sm:hidden border-b border-slate-200 bg-white px-4 pt-3 pb-6 space-y-3 animate-fade-in shadow-xl">
+        <div className="sm:hidden border-b border-slate-200 bg-white px-4 pt-3 pb-6 space-y-2 animate-fade-in shadow-xl">
           <button 
             onClick={() => {
               setActiveSection('inicio');
               setMobileMenuOpen(false);
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className="block w-full text-left py-2.5 px-3 rounded-lg text-sm font-semibold text-slate-800 hover:bg-slate-50"
+            className="block w-full text-left py-2 px-3 rounded-lg text-sm font-semibold text-slate-800 hover:bg-slate-50"
           >
             Inicio
           </button>
-          <button 
-            onClick={() => scrollToSection('features')}
-            className="block w-full text-left py-2.5 px-3 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Características
-          </button>
-          <button 
-            onClick={() => scrollToSection('modules')}
-            className="block w-full text-left py-2.5 px-3 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Módulos
-          </button>
-          <button 
-            onClick={() => scrollToSection('pricing')}
-            className="block w-full text-left py-2.5 px-3 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Precios
-          </button>
-          <button 
-            onClick={() => scrollToSection('social-proof')}
-            className="block w-full text-left py-2.5 px-3 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Casos de éxito
-          </button>
-          <button 
-            onClick={() => scrollToSection('faq')}
-            className="block w-full text-left py-2.5 px-3 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Preguntas frecuentes
-          </button>
 
-          <div className="pt-4 border-t border-slate-100 flex flex-col gap-2.5">
+          {navItems.map((item) => (
+            <button 
+              key={item.id}
+              onClick={() => scrollToSection(item.id)}
+              className="block w-full text-left py-2 px-3 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {item.label}
+            </button>
+          ))}
+
+          <div className="pt-4 border-t border-slate-100 space-y-2">
+            <Link
+              to="/login"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block w-full py-2.5 rounded-full border border-slate-200 text-slate-800 font-semibold text-sm text-center hover:bg-slate-50 transition-colors"
+            >
+              Ingresar a mi conjunto
+            </Link>
             <button
               onClick={() => {
                 setMobileMenuOpen(false);
                 onOpenDemo?.();
               }}
-              className="w-full py-3 rounded-full bg-[var(--tenant-primary)] text-white font-semibold text-sm text-center shadow-md"
+              className="w-full py-3 rounded-full bg-[#16345F] text-white font-semibold text-sm text-center shadow-md cursor-pointer"
             >
               Solicitar una demo
             </button>
-            <a 
-              href={`${window.location.protocol}//admin.${getBaseDomain(window.location.hostname)}${window.location.port ? `:${window.location.port}` : ''}/login`}
-              onClick={() => setMobileMenuOpen(false)}
-              className="w-full py-2.5 rounded-full border border-slate-200 text-slate-700 font-semibold text-sm text-center flex items-center justify-center gap-2"
-            >
-              <ArrowRight className="w-4 h-4" /> Iniciar sesión
-            </a>
           </div>
         </div>
       )}

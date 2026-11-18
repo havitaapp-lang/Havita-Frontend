@@ -50,6 +50,8 @@ export const useServerSync = (tenantId: string | undefined, isAuthenticated: boo
         es.onopen = () => {
           retryCount.current = 0;
           console.log(`[ServerSync] Connected to SSE for tenant ${tenantId}`);
+          // P8-B: el SSE no reenvía eventos perdidos; al (re)conectar se recupera una llamada entrante en curso.
+          window.dispatchEvent(new Event("havita:sse-open"));
         };
 
         const handleMessage = (e: MessageEvent) => {
@@ -96,7 +98,9 @@ export const useServerSync = (tenantId: string | undefined, isAuthenticated: boo
                 queryClient.invalidateQueries({ queryKey: ["myPeople"] });
                 queryClient.invalidateQueries({ queryKey: ["my-people"] });
                 queryClient.invalidateQueries({ queryKey: ["my-properties"] });
-                refreshProperties();
+                // Solo un residente tiene "mis propiedades": para administracion, porteria o staff la llamada falla y
+                // su catch cerraba la sesion (A-8: la baja hecha por el admin publica este evento).
+                if (userRef.current?.role === "RESIDENT") refreshProperties();
                 break;
               }
 
@@ -111,7 +115,9 @@ export const useServerSync = (tenantId: string | undefined, isAuthenticated: boo
                 queryClient.invalidateQueries({ queryKey: ["my-properties"] });
                 queryClient.invalidateQueries({ queryKey: ["myPeople"] });
                 queryClient.invalidateQueries({ queryKey: ["my-people"] });
-                refreshProperties();
+                // Solo un residente tiene "mis propiedades": para administracion, porteria o staff la llamada falla y
+                // su catch cerraba la sesion (A-8: la baja hecha por el admin publica este evento).
+                if (userRef.current?.role === "RESIDENT") refreshProperties();
                 break;
               case "VISITOR_STATUS_CHANGED":
               case "VISITOR_UPDATED":
@@ -129,6 +135,13 @@ export const useServerSync = (tenantId: string | undefined, isAuthenticated: boo
               case "COMMUNICATION_CREATED":
               case "POLL_CREATED":
               case "POLL_UPDATED":
+                // Fase 2 / E5: al abrirse o cerrarse una pregunta se relee el estado de voto de las unidades. No en cada
+                // voto ajeno (sería una consulta por residente y voto); el voto propio lo actualiza quien vota.
+                if (data.payload?.id && data.payload?.status !== "LIVE") {
+                  queryClient.invalidateQueries({ queryKey: ["myVotingUnits", data.payload.id] });
+                }
+                window.dispatchEvent(new CustomEvent(data.type, { detail: data.payload }));
+                break;
               case "MARKETPLACE_REPORT_CREATED":
               case "MARKETPLACE_REPORT_RESOLVED":
                 window.dispatchEvent(new CustomEvent(data.type, { detail: data.payload }));
@@ -140,11 +153,13 @@ export const useServerSync = (tenantId: string | undefined, isAuthenticated: boo
                 // Invalida solo las queries de asambleas — no afecta otros módulos
                 queryClient.invalidateQueries({ queryKey: ["assemblies"] });
                 queryClient.invalidateQueries({ queryKey: ["activeAssembly"] });
+                queryClient.invalidateQueries({ queryKey: ["myAttendanceUnits"] });
                 window.dispatchEvent(new CustomEvent(data.type, { detail: data.payload }));
                 break;
               case "ASSEMBLY_QUORUM_UPDATED":
                 // Solo invalida asistentes y derechos de voto — no toda la asamblea
                 queryClient.invalidateQueries({ queryKey: ["assemblyAttendees"] });
+                queryClient.invalidateQueries({ queryKey: ["myAttendanceUnits"] });
                 queryClient.invalidateQueries({ queryKey: ["votingRights"] });
                 // También actualiza el % de quórum en la página de detalle
                 queryClient.invalidateQueries({ queryKey: ["assemblies"] });
@@ -153,6 +168,19 @@ export const useServerSync = (tenantId: string | undefined, isAuthenticated: boo
 
               case "PANIC_ALERT":
               case "PANIC_ALERT_UPDATED":
+                window.dispatchEvent(new CustomEvent(data.type, { detail: data.payload }));
+                break;
+
+              case "INTERCOM_CALL_RINGING":
+              case "INTERCOM_CALL_ACCEPTED":
+              case "INTERCOM_CALL_CONNECTED":
+              case "INTERCOM_CALL_REJECTED":
+              case "INTERCOM_CALL_CANCELLED":
+              case "INTERCOM_CALL_ENDED":
+              case "INTERCOM_CALL_MISSED":
+              // Fase 3: chat interno (por la misma conexión SSE; sin conexiones por conversación).
+              case "CHAT_MESSAGE":
+              case "CHAT_CONVERSATION_UPDATED":
                 window.dispatchEvent(new CustomEvent(data.type, { detail: data.payload }));
                 break;
               default:
@@ -197,6 +225,16 @@ export const useServerSync = (tenantId: string | undefined, isAuthenticated: boo
         es.addEventListener("ASSEMBLY_STARTED", handleMessage);
         es.addEventListener("ASSEMBLY_ENDED", handleMessage);
         es.addEventListener("ASSEMBLY_QUORUM_UPDATED", handleMessage);
+        es.addEventListener("INTERCOM_CALL_RINGING", handleMessage);
+        es.addEventListener("INTERCOM_CALL_ACCEPTED", handleMessage);
+        // P8-A: el backend publica INTERCOM_CALL_CONNECTED y el switch ya lo despachaba, pero faltaba suscribirlo.
+        es.addEventListener("INTERCOM_CALL_CONNECTED", handleMessage);
+        es.addEventListener("INTERCOM_CALL_REJECTED", handleMessage);
+        es.addEventListener("INTERCOM_CALL_CANCELLED", handleMessage);
+        es.addEventListener("INTERCOM_CALL_ENDED", handleMessage);
+        es.addEventListener("INTERCOM_CALL_MISSED", handleMessage);
+        es.addEventListener("CHAT_MESSAGE", handleMessage);
+        es.addEventListener("CHAT_CONVERSATION_UPDATED", handleMessage);
 
 
         es.onerror = (err) => {
@@ -208,11 +246,11 @@ export const useServerSync = (tenantId: string | undefined, isAuthenticated: boo
           // Reconnection with exponential backoff (max 30s)
           const timeout = Math.min(1000 * Math.pow(2, retryCount.current), 30000);
           retryCount.current += 1;
-          
-          if (retryCount.current < 10) {
-            console.log(`[ServerSync] Reconnecting in ${timeout}ms...`);
-            setTimeout(connect, timeout);
-          }
+
+          // P8-B: antes se abandonaba tras 10 errores y la citofonía dejaba de recibir llamadas hasta recargar.
+          // Ahora se sigue reintentando (cada 30 s como máximo) mientras la sesión siga activa.
+          console.log(`[ServerSync] Reconnecting in ${timeout}ms...`);
+          setTimeout(connect, timeout);
         };
       } catch (err) {
         console.error("[ServerSync] Failed to obtain ticket", err);
@@ -234,6 +272,9 @@ export const useServerSync = (tenantId: string | undefined, isAuthenticated: boo
         eventSourceRef.current = null;
       }
     };
-  }, [tenantId, queryClient]);
+  // P8-A: también al iniciar o cerrar sesión, y si cambia el usuario. Antes dependía solo de la comunidad: tras un login
+  // sin recarga (comunidad ya resuelta en /login) nunca se conectaba, y el residente no recibía llamadas de citofonía
+  // hasta recargar la página. El ticket es de un solo uso y por usuario, así que un cambio de usuario reconecta.
+  }, [tenantId, queryClient, isAuthenticated, user?.id]);
 };
 

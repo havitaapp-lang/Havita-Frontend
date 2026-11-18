@@ -90,7 +90,7 @@ export const AssembliesPage = () => {
             </div>
 
             <button
-              onClick={() => navigate(`/admin/asambleas/${activeAssembly.id}`)}
+              onClick={() => navigate(`/admin/assemblies/${activeAssembly.id}`)}
               className="px-6 py-3.5 bg-white hover:bg-blue-50 text-blue-950 font-black rounded-2xl text-xs flex items-center gap-2 shadow-xl transition-all cursor-pointer whitespace-nowrap active:scale-95"
             >
               <Sparkles className="w-4 h-4 text-blue-600" />
@@ -112,7 +112,7 @@ export const AssembliesPage = () => {
           {assemblies.map((assemb) => (
             <div
               key={assemb.id}
-              onClick={() => navigate(`/admin/asambleas/${assemb.id}`)}
+              onClick={() => navigate(`/admin/assemblies/${assemb.id}`)}
               className="p-5 bg-white rounded-3xl border border-slate-200/80 shadow-2xs hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer group flex flex-col justify-between"
             >
               <div className="space-y-3">

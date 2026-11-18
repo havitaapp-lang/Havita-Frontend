@@ -36,6 +36,12 @@ export const residentInvitationService = {
     await apiClient.post<any>(`/resident-invitations/${id}/revoke`);
   },
 
+  /** Revoca la invitacion pendiente y emite una nueva para la misma unidad; solo la respuesta trae el enlace. */
+  regenerateInvitation: async (id: string): Promise<ResidentInvitationResponse> => {
+    const response = await apiClient.post<any>(`/resident-invitations/${id}/regenerate`);
+    return response;
+  },
+
   validatePublicToken: async (token: string): Promise<PublicInvitationResponse> => {
     const response = await apiClient.get<any>(`/public/resident-invitations/${token}`);
     return response;

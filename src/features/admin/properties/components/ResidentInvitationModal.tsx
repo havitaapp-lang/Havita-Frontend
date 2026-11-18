@@ -8,6 +8,17 @@ import type { PropertyUnit } from "../../../../types";
 import { useTenant } from "../../../../contexts/TenantContext";
 import { useData } from "../../../../contexts/DataContext";
 
+/**
+ * Invitacion de propietario vigente mas reciente. Las de hogar o traspaso las emiten los residentes y no se
+ * gestionan aqui; una pendiente vencida ya no sirve aunque el backend aun no la haya marcado EXPIRED.
+ */
+const currentOwnerInvitation = (list: ResidentInvitationResponse[]) =>
+  list
+    .filter((inv) => inv.status === "PENDING" && inv.invitationType === "OWNER"
+      && (!inv.expiresAt || new Date(inv.expiresAt).getTime() > Date.now()))
+    .sort((x, y) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime())
+    .slice(0, 1);
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -39,7 +50,7 @@ export const ResidentInvitationModal: React.FC<Props> = ({ isOpen, onClose, prop
     try {
       setLoading(true);
       const data = await residentInvitationService.listInvitations(property.id);
-      setInvitations(data.filter(inv => inv.status === "PENDING"));
+      setInvitations(currentOwnerInvitation(data));
     } catch (err: any) {
       console.error(err);
     } finally {
@@ -68,6 +79,28 @@ export const ResidentInvitationModal: React.FC<Props> = ({ isOpen, onClose, prop
       notificationService.showToast("Invitacion revocada", "success");
     } catch (err: any) {
       notificationService.showError("Error", err.message || "No se pudo revocar la invitacion");
+      setLoading(false);
+    }
+  };
+
+  // Por seguridad el backend solo devuelve el enlace al emitirlo; para compartirla de nuevo se emite otro.
+  const handleRegenerate = async (id: string) => {
+    const confirmed = await notificationService.showConfirm(
+      "¿Generar un nuevo enlace?",
+      "El enlace anterior dejara de funcionar. Si ya lo compartiste, envia el nuevo al residente.",
+      "Si, generar",
+      "Cancelar"
+    );
+    if (!confirmed) return;
+    try {
+      setLoading(true);
+      const newInv = await residentInvitationService.regenerateInvitation(id);
+      setInvitations([newInv]);
+      notificationService.showToast("Nuevo enlace generado", "success");
+    } catch (err: any) {
+      notificationService.showError("Error", err.message || "No se pudo generar el nuevo enlace");
+      loadInvitations();
+    } finally {
       setLoading(false);
     }
   };
@@ -115,22 +148,43 @@ export const ResidentInvitationModal: React.FC<Props> = ({ isOpen, onClose, prop
                   <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                   Invitacion Pendiente
                 </div>
-                <div className="flex justify-center mb-4">
-                  <div className="p-4 bg-white border-2 border-slate-100 rounded-2xl shadow-sm inline-block">
-                    <QRCodeSVG value={activeInv.link || ""} size={160} level="H" includeMargin={false} />
+                {activeInv.link ? (
+                  <>
+                    <div className="flex justify-center mb-4">
+                      <div className="p-4 bg-white border-2 border-slate-100 rounded-2xl shadow-sm inline-block">
+                        <QRCodeSVG data-testid="invitation-qr" value={activeInv.link} size={160} level="H" includeMargin={false} />
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-4">
+                      Pide al residente que escanee este QR o enviale el enlace directamente.
+                    </p>
+                    <div className="flex gap-2">
+                      <button onClick={handleCopy} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors">
+                        <Copy className="w-4 h-4" /> Copiar
+                      </button>
+                      <button onClick={handleWhatsApp} className="flex-1 py-2 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors">
+                        <Smartphone className="w-4 h-4" /> WhatsApp
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-sm text-slate-600">
+                      Por seguridad, el enlace solo se muestra al generarlo.
+                      {activeInv.expiresAt && <> Vence el {new Date(activeInv.expiresAt).toLocaleString("es-CO")}.</>}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Si ya lo compartiste, sigue siendo valido. Para compartirlo de nuevo genera otro enlace; el anterior dejara de funcionar.
+                    </p>
+                    <button
+                      onClick={() => handleRegenerate(activeInv.id)}
+                      disabled={loading}
+                      className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl text-sm flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Generar nuevo enlace
+                    </button>
                   </div>
-                </div>
-                <p className="text-xs text-slate-500 mb-4">
-                  Pide al residente que escanee este QR o enviale el enlace directamente.
-                </p>
-                <div className="flex gap-2">
-                  <button onClick={handleCopy} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors">
-                    <Copy className="w-4 h-4" /> Copiar
-                  </button>
-                  <button onClick={handleWhatsApp} className="flex-1 py-2 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors">
-                    <Smartphone className="w-4 h-4" /> WhatsApp
-                  </button>
-                </div>
+                )}
                 <div className="mt-4 pt-4 border-t border-slate-100">
                   <button onClick={() => handleRevoke(activeInv.id)} disabled={loading} className="text-xs text-red-500 hover:text-red-700 font-semibold flex items-center justify-center gap-1 w-full p-2">
                     <X className="w-3.5 h-3.5" /> Revocar esta invitacion

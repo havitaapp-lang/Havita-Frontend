@@ -128,8 +128,9 @@ export const PropertyTransferModal: React.FC<PropertyTransferModalProps> = ({
                   value={formData.newOwnerName} onChange={e => setFormData(f => ({ ...f, newOwnerName: e.target.value }))} />
               </div>
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1">Email</label>
-                <input type="email" className="w-full px-3 py-2 border border-slate-200 rounded-lg"
+                {/* SEC-8: la transferencia exige un destinatario identificable; el enlace queda ligado a este correo. */}
+                <label htmlFor="newOwnerEmail" className="block text-sm font-bold text-slate-700 mb-1">Email *</label>
+                <input id="newOwnerEmail" required type="email" className="w-full px-3 py-2 border border-slate-200 rounded-lg"
                   value={formData.newOwnerEmail} onChange={e => setFormData(f => ({ ...f, newOwnerEmail: e.target.value }))} />
               </div>
               <div className="grid grid-cols-2 gap-4">

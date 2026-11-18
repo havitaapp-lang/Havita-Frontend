@@ -55,6 +55,8 @@ export interface PropertyUnit {
   residentName?: string;
   residentPhone?: string;
   residentEmail?: string;
+  /** Fase 2 / E4: identificador de la estructura (el filtro compara por id, nunca por nombre). */
+  structureId?: string | null;
   structureName?: string;
   structureType?: 'Torre' | 'Bloque' | 'Manzana' | 'Sector' | 'Etapa';
   level?: string | number;
@@ -81,10 +83,12 @@ export interface Resident {
 export interface Package {
   id: string;
   tenantId: string;
-  propertyId: string; // e.g. 'Torre 2 - 504'
+  propertyId: string; // e.g. UUID or path
+  propertyNumber?: string;
+  propertyName?: string;
   recipientName: string;
   trackingNumber?: string;
-  company: string; // 'Mercado Libre' | 'Amazon' | 'Servientrega' | 'Coordinadora' | 'DHL' | 'Otro'
+  company: string; // 'Mercado Libre' | 'Amazon' | 'Servientrega' | 'Coordinadora' | 'Deprisa' | 'Inter Rapidísimo' | 'FedEx' | 'DHL' | 'Rappi' | 'Didi' | 'Otro'
   status: 'RECEIVED' | 'NOTIFIED' | 'DELIVERED';
   receivedAt: string;
   deliveredAt?: string;
@@ -103,8 +107,13 @@ export interface Visitor {
   documentId: string;
   status: 'APPROVED' | 'PENDING' | 'ENTERED' | 'EXITED' | 'EXPIRED' | 'CANCELLED';
   expectedAt?: string;
+  rawExpectedAt?: string;
   enteredAt?: string;
   exitedAt?: string;
+  /** Quién registró el ingreso (portería/administración). El backend solo lo envía al personal. */
+  enteredByName?: string;
+  /** Quién registró la salida. Solo para el personal. */
+  exitedByName?: string;
   createdAt?: string;
   vehiclePlate?: string;
   observations?: string;
@@ -119,7 +128,7 @@ export interface RequestPQRS {
   tenantId: string;
   propertyId: string; // e.g. 'Torre 2 - 504'
   residentName: string;
-  category: 'Plomería' | 'Electricidad' | 'Ascensor' | 'Seguridad' | 'Limpieza' | 'Zonas comunes' | 'Otro';
+  category: 'Plomería' | 'Electricidad' | 'Ascensor' | 'Seguridad' | 'Limpieza' | 'Zonas comunes' | 'Aseo / Zonas Comunes' | 'Daño en Zona Común' | 'Ruido / Convivencia' | 'Otro' | string;
   title: string;
   description: string;
   status: 'NEW' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
@@ -149,8 +158,12 @@ export interface Reservation {
   id: string;
   tenantId: string;
   propertyId: string;
+  propertyName?: string;
+  propertyNumber?: string;
   commonZoneId?: string;
+  commonZoneName?: string;
   residentName: string;
+  createdByUserId?: string;
   zone: 'Salón Social' | 'Zona BBQ' | 'Piscina' | 'Cancha Múltiple' | 'Gimnasio' | string;
   date: string; // YYYY-MM-DD
   startTime: string; // HH:mm
@@ -253,9 +266,15 @@ export interface MarketplaceListing {
   price: number | null;
   priceType: PriceType;
   status: ListingStatus;
+  /** URLs firmadas de vida corta (SEC-9-9); no son estables: no guardarlas ni derivar claves de ellas. */
   imageUrls: string[];
+  /** Claves de almacenamiento de las imágenes, para editar la publicación. */
+  imageKeys?: string[];
   contactPhone: string | null;
   rejectionReason: string | null;
+  hiddenByAdmin?: boolean;
+  hiddenReason?: string | null;
+  hiddenAt?: string | null;
   publishedAt: string | null;
   expiresAt: string | null;
   createdAt: string;

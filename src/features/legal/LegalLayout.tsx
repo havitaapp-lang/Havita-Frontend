@@ -23,6 +23,12 @@ export const LegalLayout: React.FC = () => {
               Privacidad
             </NavLink>
             <NavLink 
+              to="/legal/aviso-privacidad" 
+              className={({ isActive }) => isActive ? "text-brand-600" : "hover:text-brand-900 transition-colors"}
+            >
+              Aviso de Privacidad
+            </NavLink>
+            <NavLink 
               to="/legal/seguridad" 
               className={({ isActive }) => isActive ? "text-brand-600" : "hover:text-brand-900 transition-colors"}
             >

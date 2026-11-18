@@ -1,0 +1,19 @@
+{
+  "name": "havita-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Playwright E2E suite for Havita (self-contained so the app's package.json is not modified)",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "report": "playwright show-report",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "^24.13.4",
+    "typescript": "~6.0.2"
+  }
+}

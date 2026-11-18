@@ -1,0 +1,10 @@
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+.auth/
+mcp-output/
+.env.e2e
+*.log
+test-results-rerun/
+evidence/*.log

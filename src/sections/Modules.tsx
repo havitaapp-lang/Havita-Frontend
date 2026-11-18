@@ -1,182 +1,258 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ModuleCard } from '../components/ModuleCard';
 import { 
-  Users, ShieldCheck, Package, Wrench, 
-  Calendar, Megaphone, HardHat, HeartHandshake,
-  QrCode, Box, BellRing, Sparkles
+  Vote, PhoneCall, QrCode, Package, 
+  Calendar, Megaphone, ShoppingBag, Clock,
+  CheckCircle2, Volume2, ShieldCheck, Box,
+  Sparkles, BellRing, Store, UserCheck, Laptop, Smartphone, Shield
 } from 'lucide-react';
 
 interface ModulesProps {
-  onOpenDemo?: () => void;
+  onOpenDemo?: (moduleTitle?: string) => void;
 }
 
+type RoleTab = 'admin' | 'security' | 'resident' | 'all';
+
 export const Modules: React.FC<ModulesProps> = ({ onOpenDemo }) => {
+  const [activeTab, setActiveTab] = useState<RoleTab>('admin');
+
   return (
-    <section id="modules" className="py-20 sm:py-28 bg-white relative">
+    <section id="modules" className="py-20 sm:py-28 bg-slate-50/70 relative">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Section Header */}
-        <div className="text-center max-w-3xl mx-auto mb-16">
+        <div className="text-center max-w-3xl mx-auto mb-12">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 border border-blue-200/60 text-blue-700 text-xs font-semibold mb-4">
+            <Sparkles className="w-3.5 h-3.5" />
+            Módulos Diseñados para Copropiedades en Colombia
+          </div>
           <h2 className="text-3xl sm:text-4xl lg:text-[2.65rem] font-black text-[#16345F] tracking-tight mb-4 leading-tight">
-            Todo lo que ocurre en tu comunidad
+            Todo el ecosistema de tu copropiedad en una sola plataforma
           </h2>
           <p className="text-base sm:text-lg text-[#667085] leading-relaxed">
-            Un solo lugar para administrar, comunicar y conectar a todos los actores de tu unidad residencial.
+            Elimina el desorden de planillas físicas, aparatos costosos y canales informales. Explora las soluciones diseñadas para cada actor de la comunidad:
           </p>
         </div>
 
-        {/* 8 Module Cards Grid (4 columns on lg) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        {/* Role Tabs Navigation */}
+        <div className="flex justify-center mb-12">
+          <div className="inline-flex p-1.5 bg-white border border-slate-200 rounded-2xl shadow-xs gap-1 max-w-full overflow-x-auto">
+            <button
+              onClick={() => setActiveTab('admin')}
+              className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'admin'
+                  ? 'bg-[#16345F] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              <Laptop className="w-4 h-4" />
+              <span>Para la Administración</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('security')}
+              className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'security'
+                  ? 'bg-[#16345F] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              <Shield className="w-4 h-4" />
+              <span>Para la Portería</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('resident')}
+              className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'resident'
+                  ? 'bg-[#16345F] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              <Smartphone className="w-4 h-4" />
+              <span>Para los Residentes</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('all')}
+              className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'all'
+                  ? 'bg-[#16345F] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              <span>Ver Todos (8)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Modules Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           
-          {/* CARD 1: Gestión de Residentes */}
-          <ModuleCard
-            onClick={onOpenDemo}
-            icon={<Users className="w-6 h-6" />}
-            iconBg="bg-blue-50"
-            iconColor="text-[var(--tenant-primary)]"
-            arrowHoverBg="bg-[var(--tenant-primary)]"
-            title="Gestión de Residentes"
-            description="Administra la información de propietarios y arrendatarios de forma simple y segura."
-            visualGraphic={
-              <div className="w-14 h-14 rounded-2xl bg-blue-50/70 border border-blue-100/80 p-1 flex items-center justify-center overflow-hidden">
-                <div className="flex -space-x-2">
-                  <div className="w-7 h-7 rounded-full bg-blue-400 border-2 border-white flex items-center justify-center text-white text-[9px] font-bold shadow-xs">
-                    JR
+          {/* CARD 1: Asambleas y Votaciones Digitales (Admin) */}
+          {(activeTab === 'admin' || activeTab === 'all') && (
+            <ModuleCard
+              onClick={() => onOpenDemo?.('Asambleas y Votaciones')}
+              theme="blue"
+              badge="Ley 675 • Coeficientes"
+              icon={<Vote className="w-6 h-6" />}
+              iconBg="bg-blue-50"
+              iconColor="text-blue-600"
+              title="Asambleas y Votaciones"
+              description="Cálculo de quórum automático y votaciones ponderadas en tiempo real por coeficiente de copropiedad. Actas auditables con validez jurídica."
+              visualGraphic={
+                <div className="w-14 h-14 rounded-2xl bg-blue-50/90 border border-blue-200/80 p-2 flex flex-col items-center justify-center">
+                  <span className="text-[10px] font-black text-blue-700">74.8%</span>
+                  <span className="text-[8px] font-semibold text-blue-500 uppercase tracking-tighter">Quórum</span>
+                </div>
+              }
+            />
+          )}
+
+          {/* CARD 2: Citofonía Virtual WebRTC (Security / Admin) */}
+          {(activeTab === 'security' || activeTab === 'all') && (
+            <ModuleCard
+              onClick={() => onOpenDemo?.('Citofonía Virtual WebRTC')}
+              theme="emerald"
+              badge="WebRTC • Cero Cables"
+              icon={<PhoneCall className="w-6 h-6" />}
+              iconBg="bg-emerald-50"
+              iconColor="text-emerald-600"
+              title="Citofonía Virtual"
+              description="Llamadas de voz en tiempo real entre la portería y los celulares de los residentes. Sin cableado, sin aparatos que se dañan y con Cloudflare."
+              visualGraphic={
+                <div className="w-14 h-14 rounded-2xl bg-emerald-50/90 border border-emerald-200/80 flex items-center justify-center p-2">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-xs animate-pulse">
+                    <Volume2 className="w-4 h-4" />
                   </div>
-                  <div className="w-7 h-7 rounded-full bg-teal-400 border-2 border-white flex items-center justify-center text-white text-[9px] font-bold shadow-xs">
-                    MC
+                </div>
+              }
+            />
+          )}
+
+          {/* CARD 3: Control de Acceso y Visitas QR (Security / Resident) */}
+          {(activeTab === 'security' || activeTab === 'resident' || activeTab === 'all') && (
+            <ModuleCard
+              onClick={() => onOpenDemo?.('Accesos y Pases QR')}
+              theme="cyan"
+              badge="Seguridad Ágil"
+              icon={<ShieldCheck className="w-6 h-6" />}
+              iconBg="bg-cyan-50"
+              iconColor="text-cyan-600"
+              title="Accesos y Pases QR"
+              description="Invitaciones temporales con código QR para visitas, contratistas y domicilios. Validación instantánea desde la portería con control de ingresos."
+              visualGraphic={
+                <div className="w-14 h-14 rounded-2xl bg-cyan-50/90 border border-cyan-200/80 flex items-center justify-center p-2">
+                  <div className="w-8 h-8 rounded-lg bg-white border border-cyan-300 flex items-center justify-center shadow-xs">
+                    <QrCode className="w-5 h-5 text-cyan-700" />
                   </div>
                 </div>
-              </div>
-            }
-          />
+              }
+            />
+          )}
 
-          {/* CARD 2: Control de Visitantes */}
-          <ModuleCard
-            onClick={onOpenDemo}
-            icon={<ShieldCheck className="w-6 h-6" />}
-            iconBg="bg-emerald-50"
-            iconColor="text-[#10B981]"
-            arrowHoverBg="bg-[#10B981]"
-            title="Control de Visitantes"
-            description="Autoriza visitantes, registra ingresos y mantén un control completo."
-            visualGraphic={
-              <div className="w-14 h-14 rounded-2xl bg-emerald-50/70 border border-emerald-100/80 flex items-center justify-center p-2">
-                <div className="w-full h-full bg-white rounded-lg border border-emerald-200 flex items-center justify-center shadow-xs">
-                  <QrCode className="w-6 h-6 text-emerald-600" />
+          {/* CARD 4: Paquetería con Alerta Push (Security / Resident) */}
+          {(activeTab === 'security' || activeTab === 'resident' || activeTab === 'all') && (
+            <ModuleCard
+              onClick={() => onOpenDemo?.('Recepción de Paquetes')}
+              theme="amber"
+              badge="Notificación Push"
+              icon={<Package className="w-6 h-6" />}
+              iconBg="bg-amber-50"
+              iconColor="text-amber-600"
+              title="Recepción de Paquetes"
+              description="Registro fotográfico de correspondencia en portería y alerta push instantánea al residente con código único de retiro seguro."
+              visualGraphic={
+                <div className="w-14 h-14 rounded-2xl bg-amber-50/90 border border-amber-200/80 flex items-center justify-center p-2">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500 text-white flex items-center justify-center shadow-xs">
+                    <Box className="w-4 h-4" />
+                  </div>
                 </div>
-              </div>
-            }
-          />
+              }
+            />
+          )}
 
-          {/* CARD 3: Paquetería */}
-          <ModuleCard
-            onClick={onOpenDemo}
-            icon={<Package className="w-6 h-6" />}
-            iconBg="bg-amber-50"
-            iconColor="text-amber-500"
-            arrowHoverBg="bg-amber-500"
-            title="Paquetería"
-            description="Registra, notifica y da seguimiento a cada paquete en tiempo real."
-            visualGraphic={
-              <div className="w-14 h-14 rounded-2xl bg-amber-50/70 border border-amber-100/80 flex items-center justify-center p-2">
-                <div className="relative">
-                  <Box className="w-7 h-7 text-amber-600 fill-amber-100/60" />
-                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-amber-500 rounded-full ring-2 ring-white flex items-center justify-center text-[7px] text-white font-black">
-                    1
-                  </span>
+          {/* CARD 5: Reservas de Zonas Comunes (Resident / Admin) */}
+          {(activeTab === 'resident' || activeTab === 'all') && (
+            <ModuleCard
+              onClick={() => onOpenDemo?.('Reservas de Zonas Comunes')}
+              theme="purple"
+              badge="Autogestión 24/7"
+              icon={<Calendar className="w-6 h-6" />}
+              iconBg="bg-purple-50"
+              iconColor="text-purple-600"
+              title="Reservas de Zonas Comunes"
+              description="Disponibilidad en vivo de salón social, zona BBQ, canchas y gimnasio. Gestión automatizada de horarios, aforos y comprobantes de depósito."
+              visualGraphic={
+                <div className="w-14 h-14 rounded-2xl bg-purple-50/90 border border-purple-200/80 flex flex-col items-center justify-center p-1">
+                  <span className="text-[10px] font-bold text-purple-700">Zona BBQ</span>
+                  <span className="text-[8px] bg-purple-200 text-purple-800 px-1.5 py-0.2 rounded-full font-semibold">18:00</span>
                 </div>
-              </div>
-            }
-          />
+              }
+            />
+          )}
 
-          {/* CARD 4: PQRS y Mantenimiento */}
-          <ModuleCard
-            onClick={onOpenDemo}
-            icon={<Wrench className="w-6 h-6" />}
-            iconBg="bg-orange-50"
-            iconColor="text-orange-500"
-            arrowHoverBg="bg-orange-500"
-            title="PQRS y Mantenimiento"
-            description="Reporta, asigna y da seguimiento a las solicitudes de tu comunidad."
-            visualGraphic={
-              <div className="w-14 h-14 rounded-2xl bg-orange-50/70 border border-orange-100/80 flex items-center justify-center p-2">
-                <div className="w-9 h-9 rounded-xl bg-orange-500 text-white flex items-center justify-center shadow-xs">
-                  <Wrench className="w-5 h-5" />
+          {/* CARD 6: PQRS y Comunicados Oficiales (Admin / Resident) */}
+          {(activeTab === 'admin' || activeTab === 'all') && (
+            <ModuleCard
+              onClick={() => onOpenDemo?.('PQRS y Comunicados')}
+              theme="indigo"
+              badge="Radicado y Trazabilidad"
+              icon={<Megaphone className="w-6 h-6" />}
+              iconBg="bg-indigo-50"
+              iconColor="text-indigo-600"
+              title="PQRS y Comunicados"
+              description="Canal formal de solicitudes y reclamos con radicado consecutivo, semáforo de respuesta y muro institucional con confirmación de lectura."
+              visualGraphic={
+                <div className="w-14 h-14 rounded-2xl bg-indigo-50/90 border border-indigo-200/80 flex items-center justify-center p-2">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                    <BellRing className="w-4 h-4" />
+                  </div>
                 </div>
-              </div>
-            }
-          />
+              }
+            />
+          )}
 
-          {/* CARD 5: Reservas */}
-          <ModuleCard
-            onClick={onOpenDemo}
-            icon={<Calendar className="w-6 h-6" />}
-            iconBg="bg-rose-50"
-            iconColor="text-rose-500"
-            arrowHoverBg="bg-rose-500"
-            title="Reservas"
-            description="Agenda salones, piscinas y zonas comunes de forma fácil y rápida."
-            visualGraphic={
-              <div className="w-14 h-14 rounded-2xl bg-rose-50/70 border border-rose-100/80 flex items-center justify-center p-1.5 overflow-hidden">
-                <div className="w-full h-full bg-gradient-to-tr from-sky-400 to-teal-300 rounded-lg flex items-center justify-center text-white shadow-xs">
-                  <Sparkles className="w-5 h-5" />
+          {/* CARD 7: Marketplace y Directorio Comunitario (Resident) */}
+          {(activeTab === 'resident' || activeTab === 'all') && (
+            <ModuleCard
+              onClick={() => onOpenDemo?.('Marketplace Vecinal')}
+              theme="rose"
+              badge="Comunidad Segura"
+              icon={<ShoppingBag className="w-6 h-6" />}
+              iconBg="bg-rose-50"
+              iconColor="text-rose-600"
+              title="Marketplace Vecinal"
+              description="Directorio de emprendimientos y servicios profesionales entre vecinos verificados. Fomenta la confianza y el comercio local seguro."
+              visualGraphic={
+                <div className="w-14 h-14 rounded-2xl bg-rose-50/90 border border-rose-200/80 flex items-center justify-center p-2">
+                  <div className="w-8 h-8 rounded-lg bg-rose-500 text-white flex items-center justify-center shadow-xs">
+                    <Store className="w-4 h-4" />
+                  </div>
                 </div>
-              </div>
-            }
-          />
+              }
+            />
+          )}
 
-          {/* CARD 6: Comunicaciones */}
-          <ModuleCard
-            onClick={onOpenDemo}
-            icon={<Megaphone className="w-6 h-6" />}
-            iconBg="bg-blue-50"
-            iconColor="text-[var(--tenant-primary)]"
-            arrowHoverBg="bg-[var(--tenant-primary)]"
-            title="Comunicaciones"
-            description="Envía comunicados y mantén informada a toda la comunidad."
-            visualGraphic={
-              <div className="w-14 h-14 rounded-2xl bg-blue-50/70 border border-blue-100/80 flex items-center justify-center p-2">
-                <div className="w-8 h-8 rounded-full bg-[var(--tenant-primary)] text-white flex items-center justify-center shadow-xs">
-                  <BellRing className="w-4 h-4" />
+          {/* CARD 8: Personal y Bitácora de Portería (Admin / Security) */}
+          {(activeTab === 'admin' || activeTab === 'security' || activeTab === 'all') && (
+            <ModuleCard
+              onClick={() => onOpenDemo?.('Personal y Turnos de Portería')}
+              theme="violet"
+              badge="Control Operativo"
+              icon={<Clock className="w-6 h-6" />}
+              iconBg="bg-violet-50"
+              iconColor="text-violet-600"
+              title="Personal y Turnos de Portería"
+              description="Control de turnos diurnos y nocturnos para guardas de seguridad, bitácora digital de novedades de relevo y registro de rondas."
+              visualGraphic={
+                <div className="w-14 h-14 rounded-2xl bg-violet-50/90 border border-violet-200/80 flex flex-col items-center justify-center p-1">
+                  <span className="text-[10px] font-black text-violet-700">Turno B</span>
+                  <span className="text-[8px] text-violet-500 font-semibold">06:00 - 18:00</span>
                 </div>
-              </div>
-            }
-          />
-
-          {/* CARD 7: Personal y Turnos */}
-          <ModuleCard
-            onClick={onOpenDemo}
-            icon={<HardHat className="w-6 h-6" />}
-            iconBg="bg-teal-50"
-            iconColor="text-[#18B89A]"
-            arrowHoverBg="bg-[#18B89A]"
-            title="Personal y Turnos"
-            description="Controla trabajadores, turnos y asistencia de forma simple."
-            visualGraphic={
-              <div className="w-14 h-14 rounded-2xl bg-teal-50/70 border border-teal-100/80 flex items-center justify-center p-2">
-                <div className="w-9 h-9 rounded-xl bg-[#18B89A] text-white flex items-center justify-center shadow-xs">
-                  <HardHat className="w-5 h-5" />
-                </div>
-              </div>
-            }
-          />
-
-          {/* CARD 8: Comunidad */}
-          <ModuleCard
-            onClick={onOpenDemo}
-            icon={<HeartHandshake className="w-6 h-6" />}
-            iconBg="bg-purple-50"
-            iconColor="text-purple-600"
-            arrowHoverBg="bg-purple-600"
-            title="Comunidad"
-            description="Marketplace, mascotas, vehículos y más, en un solo lugar."
-            visualGraphic={
-              <div className="w-14 h-14 rounded-2xl bg-purple-50/70 border border-purple-100/80 flex items-center justify-center p-2">
-                <span className="text-xl">🐕</span>
-              </div>
-            }
-          />
+              }
+            />
+          )}
 
         </div>
 

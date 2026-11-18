@@ -1,10 +1,14 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { Search, Plus, Filter, Edit, Trash2, X, Phone, Mail, Home, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { residentApi } from '../../api/residentApi';
+import { ApiError } from '../../api/apiClient';
+import { statusLabel, unitLabel } from './residentFormat';
+import { ALL_STRUCTURES, structureOptions, structureQueryParam } from './structureFilter';
+import { StructureFilterSelect } from './StructureFilterSelect';
 import { propertyApi } from '../../api/propertyApi';
 import { useTenant } from '../../contexts/TenantContext';
 import type { Resident } from '../../types';
@@ -37,68 +41,94 @@ export const ResidentsPage = () => {
     name: '',
     email: '',
     phone: '',
-    propertyIds: [] as string[],
+    propertyId: '',
     type: 'Propietario',
-    status: 'ACTIVE'
+    status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE'
   });
+  const [unitSearch, setUnitSearch] = useState('');
 
-  
+
   const [currentPage, setCurrentPage] = useState(1);
 
   
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('Todos');
+  // D-5: el Directorio muestra por defecto solo residentes activos; INACTIVE o todos para consultar el historial.
+  const [filterStatus, setFilterStatus] = useState<'ACTIVE' | 'INACTIVE' | 'ALL'>('ACTIVE');
+  // Fase 2 / E4 (D7): estructura por id ('ALL' = todas, 'NONE' = sin estructura).
+  const [filterStructure, setFilterStructure] = useState<string>(ALL_STRUCTURES);
 
-  const { mutate: createResident } = useMutation({
-    mutationFn: residentApi.create,
+  // Alta (POST) y edición (PUT /residents/{id}); los avisos dependen del resultado real (#2, #9).
+  const saveResident = useMutation({
+    mutationFn: (payload: { id?: string; data: any }) =>
+      payload.id ? residentApi.update(payload.id, payload.data) : residentApi.create(payload.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['residents'] });
-      setIsModalOpen(false);
     }
   });
 
-  const { mutate: updateResident } = useMutation({
-    mutationFn: (data: any) => residentApi.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['residents'] });
-      setIsModalOpen(false);
-    }
-  });
-
+  // Baja lógica (A-8): el registro queda INACTIVE con su historial. El aviso depende del resultado real.
   const { mutate: deleteResident } = useMutation({
     mutationFn: residentApi.delete,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['residents'] });
+      notificationService.showToast('Residente dado de baja', 'success');
+    },
+    onError: () => {
+      notificationService.showError('No se pudo dar de baja', 'Ocurrió un error al dar de baja al residente. Inténtalo de nuevo.');
     }
   });
 
+  // Filtros, paginación y total se resuelven en el backend (TASK-008): la página nunca se calcula en memoria.
   const { data: residentPage, isLoading: residentsLoading } = useQuery({
-    queryKey: ['residents', currentPage, searchTerm],
-    queryFn: () => residentApi.findAll(currentPage - 1, ITEMS_PER_PAGE, searchTerm)
+    queryKey: ['residents', currentPage, searchTerm, filterStatus, filterType, filterStructure],
+    queryFn: () => residentApi.findAll(currentPage - 1, ITEMS_PER_PAGE, searchTerm, {
+      status: filterStatus === 'ALL' ? undefined : filterStatus,
+      type: filterType === 'Todos' ? undefined : filterType,
+      structureId: structureQueryParam(filterStructure),
+    })
   });
   
   const { data: properties = [] } = useQuery({
     queryKey: ['properties'],
     queryFn: () => propertyApi.findAll()
   });
+  // Opciones del filtro por estructura a partir de las unidades ya cargadas (sin petición adicional).
+  const structureFilter = useMemo(() => structureOptions(properties), [properties]);
 
-  const tenantResidents = residentPage?.content || [];
-  const totalPages = residentPage?.totalPages || 1;
-  const filteredResidents = tenantResidents;
-  const paginatedResidents = tenantResidents;
+  const paginatedResidents = residentPage?.content || [];
+  const totalElements = residentPage?.totalElements ?? 0;
+  const totalPages = Math.max(1, residentPage?.totalPages || 1);
+  const firstShown = (currentPage - 1) * ITEMS_PER_PAGE + 1;
+  const lastShown = Math.min(currentPage * ITEMS_PER_PAGE, totalElements);
+
+  // Si una baja o un filtro deja la página actual fuera de rango, se vuelve a la última página con datos.
+  useEffect(() => {
+    if (residentPage && totalElements > 0 && currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [residentPage, totalElements, totalPages, currentPage]);
   const tenantProperties = properties;
+  // Opciones del selector de unidad; la seleccionada se mantiene aunque no coincida con la búsqueda.
+  const unitOptions = useMemo(() => {
+    const term = unitSearch.trim().toLowerCase();
+    return [...tenantProperties]
+      .filter((p) => !term || p.id === formData.propertyId || unitLabel(p).toLowerCase().includes(term))
+      .sort((a, b) => unitLabel(a).localeCompare(unitLabel(b), 'es', { numeric: true }));
+  }, [tenantProperties, unitSearch, formData.propertyId]);
 
 
   const handleOpenCreate = () => {
     setEditingResident(null);
     setFormData({
       name: '',
-      propertyIds: [] as string[],
+      propertyId: '',
       type: 'Propietario',
       phone: '',
       email: '',
       status: 'ACTIVE'
     });
+    setUnitSearch('');
     setErrors({});
     setErrorList([]);
     setIsModalOpen(true);
@@ -108,50 +138,17 @@ export const ResidentsPage = () => {
     setEditingResident(resident);
     setFormData({
       name: resident.name,
-      propertyIds: [resident.propertyId],
+      propertyId: resident.propertyId,
       type: resident.type,
       phone: resident.phone,
       email: resident.email,
-      status: resident.status
+      status: resident.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE'
     });
+    setUnitSearch('');
     setErrors({});
     setErrorList([]);
     setIsModalOpen(true);
   };
-
-  
-  const createMutation = useMutation({
-    mutationFn: async (data: any) => {
-      const firstProp = data.propertyIds[0];
-      const res = await residentApi.create({ ...data, propertyId: firstProp });
-      if (data.propertyIds.length > 1 && res.userId) {
-         await residentApi.assignProperties(res.userId, data.propertyIds, data.type, false);
-      }
-      return res;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['residents'] });
-      notificationService.showToast('Propietario creado', 'success');
-      setIsModalOpen(false);
-    }
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: async (data: any) => residentApi.assignProperties(data.userId, data.propertyIds, data.type, false),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['residents'] });
-      notificationService.showToast('Propiedades actualizadas', 'success');
-      setIsModalOpen(false);
-    }
-  });
-  
-  const deleteMutation = useMutation({
-    mutationFn: residentApi.delete,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['residents'] });
-      notificationService.showToast('Residente eliminado', 'success');
-    }
-  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,7 +158,7 @@ export const ResidentsPage = () => {
       name: normalizeWhitespace(formData.name),
       email: normalizeEmail(formData.email),
       phone: normalizePhone(formData.phone),
-      propertyIds: formData.propertyIds,
+      propertyId: formData.propertyId,
       type: formData.type,
     };
 
@@ -178,27 +175,22 @@ export const ResidentsPage = () => {
     setIsSubmitting(true);
 
     try {
-      await new Promise((res) => setTimeout(res, 400));
-
       if (editingResident) {
-        updateResident({
+        await saveResident.mutateAsync({
           id: editingResident.id,
-          ...normalizedData,
-          status: formData.status,
+          data: { ...normalizedData, status: formData.status },
         });
         notificationService.showToast('Residente actualizado correctamente', 'success');
       } else {
-        createResident({
-          ...normalizedData,
-          status: formData.status,
-          tenantId: currentTenant?.id || 'tenant-limonar'
-        });
+        // CreateResidentRequest no admite estado: el backend siempre crea ACTIVE.
+        await saveResident.mutateAsync({ data: normalizedData });
         notificationService.showToast('Residente registrado exitosamente', 'success');
       }
-
       setIsModalOpen(false);
-    } catch {
-      notificationService.showError('No se pudo guardar', 'Ocurrió un error al guardar el residente.');
+    } catch (err) {
+      // El modal sigue abierto para corregir y reintentar.
+      const detail = err instanceof ApiError && err.message ? err.message : 'Ocurrió un error al guardar el residente.';
+      notificationService.showError('No se pudo guardar', detail);
     } finally {
       setIsSubmitting(false);
     }
@@ -206,15 +198,14 @@ export const ResidentsPage = () => {
 
   const handleDelete = async (id: string, name: string) => {
     const confirmed = await notificationService.showConfirm(
-      '¿Eliminar residente?',
-      `Esta acción eliminará a "${name}" de la base de datos y no se puede deshacer.`,
-      'Sí, eliminar',
+      '¿Dar de baja al residente?',
+      `"${name}" perderá el acceso a esta unidad. Su historial (reservas, PQRS, pagos y votaciones) se conserva y la administración puede reactivarlo.`,
+      'Sí, dar de baja',
       'Cancelar'
     );
 
     if (confirmed) {
       deleteResident(id);
-      notificationService.showToast('Residente eliminado', 'success');
     }
   };
 
@@ -240,7 +231,8 @@ export const ResidentsPage = () => {
             <input 
               type="search"
               maxLength={FIELD_LIMITS.SEARCH_MAX_LENGTH}
-              placeholder="Buscar por nombre, apartamento o correo..." 
+              aria-label="Buscar residentes"
+              placeholder="Buscar por nombre, apartamento o correo..."
               className="w-full pl-9 pr-4 py-2 text-xs sm:text-sm bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-[var(--tenant-primary)]"
               value={searchTerm}
               onChange={(e) => {
@@ -250,12 +242,22 @@ export const ResidentsPage = () => {
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Filter className="w-4 h-4 text-slate-400" />
+            <StructureFilterSelect
+              value={filterStructure}
+              onChange={(value) => {
+                setFilterStructure(value);
+                setCurrentPage(1);
+              }}
+              options={structureFilter.options}
+              hasUnitsWithoutStructure={structureFilter.hasUnitsWithoutStructure}
+            />
             <select
+              aria-label="Filtrar por tipo"
               value={filterType}
               onChange={(e) => {
-                setFilterType(e.target.value as any);
+                setFilterType(e.target.value);
                 setCurrentPage(1);
               }}
               className="px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100"
@@ -263,6 +265,20 @@ export const ResidentsPage = () => {
               <option value="Todos">Todos los tipos</option>
               <option value="Propietario">Propietarios</option>
               <option value="Arrendatario">Arrendatarios</option>
+              <option value="Residente">Residentes</option>
+            </select>
+            <select
+              aria-label="Filtrar por estado"
+              value={filterStatus}
+              onChange={(e) => {
+                setFilterStatus(e.target.value as 'ACTIVE' | 'INACTIVE' | 'ALL');
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="ACTIVE">Activos</option>
+              <option value="INACTIVE">Inactivos</option>
+              <option value="ALL">Todos los estados</option>
             </select>
           </div>
         </div>
@@ -286,7 +302,7 @@ export const ResidentsPage = () => {
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
                           <Home className="w-3 h-3 text-slate-500" />
-                          {res.propertyId}
+                          {unitLabel({ number: res.propertyNumber, name: res.propertyName })}
                         </span>
                         <Badge variant={res.type === 'Propietario' ? 'secondary' : 'outline'}>
                           {res.type}
@@ -299,7 +315,7 @@ export const ResidentsPage = () => {
                     res.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
                   }`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${res.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                    {res.status}
+                    {statusLabel(res.status)}
                   </span>
                 </div>
 
@@ -365,14 +381,14 @@ export const ResidentsPage = () => {
                         </div>
                         <div>
                           <div className="font-semibold text-slate-900">{res.name}</div>
-                          <div className="text-xs text-slate-400">ID: {res.id.slice(-6)}</div>
+                          {res.documentId && <div className="text-xs text-slate-400">Doc. {res.documentId}</div>}
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 text-slate-700 font-medium">
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 text-xs text-slate-800">
                         <Home className="w-3 h-3 text-slate-500" />
-                        {res.propertyId}
+                        {unitLabel({ number: res.propertyNumber, name: res.propertyName })}
                       </span>
                     </td>
                     <td className="px-6 py-4">
@@ -395,7 +411,7 @@ export const ResidentsPage = () => {
                         res.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
                       }`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${res.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                        {res.status}
+                        {statusLabel(res.status)}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
@@ -424,15 +440,16 @@ export const ResidentsPage = () => {
         </div>
 
         {/* Pagination Bar */}
-        {filteredResidents.length > 0 && (
+        {totalElements > 0 && paginatedResidents.length > 0 && (
           <div className="p-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
             <span>
-              Mostrando {(currentPage - 1) * ITEMS_PER_PAGE + 1} a {Math.min(currentPage * ITEMS_PER_PAGE, filteredResidents.length)} de {filteredResidents.length} residentes
+              Mostrando {firstShown} a {lastShown} de {totalElements} residentes
             </span>
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
                 size="sm"
+                aria-label="Página anterior"
                 disabled={currentPage === 1}
                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                 className="p-1.5 h-8 w-8"
@@ -445,6 +462,7 @@ export const ResidentsPage = () => {
               <Button
                 variant="outline"
                 size="sm"
+                aria-label="Página siguiente"
                 disabled={currentPage >= totalPages}
                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                 className="p-1.5 h-8 w-8"
@@ -459,12 +477,17 @@ export const ResidentsPage = () => {
       {/* Modal Crear / Editar Residente */}
       {isModalOpen && (
         <div 
-          className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
           onKeyDown={(e) => { if (e.key === 'Escape' && !isSubmitting) setIsModalOpen(false); }}
         >
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="resident-modal-title"
+            className="bg-white rounded-3xl max-w-md w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-slate-100 space-y-4 animate-in fade-in zoom-in-95 duration-200"
+          >
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="text-lg font-bold text-slate-900">
+              <h3 id="resident-modal-title" className="text-lg font-bold text-slate-900">
                 {editingResident ? 'Editar Residente' : 'Registrar Nuevo Residente'}
               </h3>
               <button 
@@ -550,25 +573,38 @@ export const ResidentsPage = () => {
                   </FormField>
                 </div>
 <div className="grid grid-cols-1 gap-3 col-span-2">
-                  <label className="text-sm font-medium text-slate-700">Propiedades Asignadas</label>
-                  <div className="flex flex-wrap gap-2">
-                    {tenantProperties.map(p => (
-                      <label key={p.id} className="flex items-center gap-2 p-2 border rounded-lg cursor-pointer hover:bg-slate-50">
-                        <input
-                          type="checkbox"
-                          checked={formData.propertyIds.includes(p.id)}
-                          onChange={(e) => {
-                            const newIds = e.target.checked 
-                              ? [...formData.propertyIds, p.id] 
-                              : formData.propertyIds.filter(id => id !== p.id);
-                            setFormData({ ...formData, propertyIds: newIds });
-                          }}
-                        />
-                        <span className="text-sm">{p.name || p.number}</span>
-                      </label>
+                <FormField
+                  id="propertyId"
+                  label="Unidad"
+                  required
+                  error={errors.propertyId}
+                  helperText="Una unidad por registro. Para varias unidades usa «Asignar existente» o la invitación."
+                >
+                  <select
+                    id="propertyId"
+                    name="propertyId"
+                    value={formData.propertyId}
+                    onChange={(e) => {
+                      setFormData({ ...formData, propertyId: e.target.value });
+                      if (errors.propertyId) setErrors({ ...errors, propertyId: '' });
+                    }}
+                    className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="">Selecciona una unidad</option>
+                    {unitOptions.map((p) => (
+                      <option key={p.id} value={p.id}>{unitLabel(p)}</option>
                     ))}
-                  </div>
-                
+                  </select>
+                </FormField>
+                <input
+                  type="search"
+                  aria-label="Buscar unidad"
+                  value={unitSearch}
+                  onChange={(e) => setUnitSearch(e.target.value)}
+                  className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  placeholder="Filtrar unidades por torre, piso o apartamento"
+                />
+
                 <FormField
                     id="type"
                   label="Tipo de residente"
@@ -587,21 +623,24 @@ export const ResidentsPage = () => {
                 </FormField>
               </div>
 
-              <FormField
-                id="status"
-                label="Estado de cuenta"
-              >
-                <select
+              {editingResident && (
+                <FormField
                   id="status"
-                  name="status"
-                  value={formData.status}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-                  className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  label="Estado de cuenta"
+                  helperText={formData.status === 'INACTIVE' ? 'Inactivo equivale a dar de baja de esta unidad; el historial se conserva.' : undefined}
                 >
-                  <option value="Activo">Activo</option>
-                  <option value="Inactivo">Inactivo</option>
-                </select>
-              </FormField>
+                  <select
+                    id="status"
+                    name="status"
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value as 'ACTIVE' | 'INACTIVE' })}
+                    className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="ACTIVE">Activo</option>
+                    <option value="INACTIVE">Inactivo</option>
+                  </select>
+                </FormField>
+              )}
 
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                 <Button 

@@ -157,7 +157,12 @@ export const SecurityPackages = () => {
     }
   };
 
-  const handleDelete = async (id: string, recipient: string) => {
+  const handleDelete = async (id: string, recipient: string, status?: string) => {
+    if (status === 'DELIVERED') {
+      notificationService.showToast('No se puede eliminar un paquete que ya ha sido entregado', 'error');
+      return;
+    }
+
     const confirmed = await notificationService.showConfirm(
       '¿Eliminar paquete?',
       `¿Deseas eliminar el registro para ${recipient}? Esta acción no se puede deshacer.`,
@@ -240,19 +245,20 @@ export const SecurityPackages = () => {
     }
   };
 
-  const getPropertyDisplay = (propId: string) => {
-    if (!propId) return 'Seleccionar unidad';
-    const prop = properties.find(p => p.id === propId);
-    if (!prop) return propId; // fallback
-    
-    // Si la ruta o el nombre ya trae el formato completo, usémoslo para evitar duplicados.
-    // Ejemplo: si el backend devuelve un path como "Torre 1 - Piso 2 - Apto 1"
-    if (prop.path && prop.path.includes('-')) {
+  const getPropertyDisplay = (propId: string, propertyNameFallback?: string) => {
+    if (!propId && !propertyNameFallback) return 'Seleccionar unidad';
+    const prop = properties.find(p => p.id === propId || p.path === propId || p.name === propId);
+    if (prop?.path) {
       return prop.path;
     }
-    if (prop.name.includes('-') || prop.name.includes('Torre')) {
+    if (prop?.name) {
       return prop.name;
     }
+    if (propertyNameFallback && propertyNameFallback.trim().length > 0) {
+      return propertyNameFallback;
+    }
+
+    if (!prop) return propId; // fallback
 
     let struct = prop.structureName || '';
     if (struct && prop.structureType && !struct.toLowerCase().includes(prop.structureType.toLowerCase())) {
@@ -265,12 +271,11 @@ export const SecurityPackages = () => {
     }
 
     let num = prop.number || prop.name || '';
-    // Si el 'num' resulta ser toda la cadena "Torre 1-Piso 2-Apto 1", no lo concatenamos de nuevo
     if (num.includes(struct) && struct !== '') {
-      return num; // ya viene armado desde el backend
+      return num;
     }
     
-    return [struct, lvl, num].filter(Boolean).join('-');
+    return [struct, lvl, num].filter(Boolean).join(' -> ');
   };
 
   return (
@@ -349,7 +354,7 @@ export const SecurityPackages = () => {
                       <h4 className="font-semibold text-slate-900 text-sm leading-snug">{pkg.recipientName}</h4>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
-                          {getPropertyDisplay(pkg.propertyId)}
+                          {getPropertyDisplay(pkg.propertyId, pkg.propertyName)}
                         </span>
                         <span className="text-xs font-semibold text-slate-700">{pkg.company}</span>
                       </div>
@@ -409,13 +414,15 @@ export const SecurityPackages = () => {
                     <Edit className="w-3.5 h-3.5" />
                     Editar
                   </button>
-                  <button 
-                    onClick={() => handleDelete(pkg.id, pkg.recipientName)}
-                    className="min-h-[40px] px-3 py-2 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition-colors flex items-center justify-center gap-1.5"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Eliminar
-                  </button>
+                  {pkg.status !== 'DELIVERED' && (
+                    <button 
+                      onClick={() => handleDelete(pkg.id, pkg.recipientName, pkg.status)}
+                      className="min-h-[40px] px-3 py-2 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Eliminar
+                    </button>
+                  )}
                 </div>
               </div>
             ))
@@ -461,7 +468,7 @@ export const SecurityPackages = () => {
                     <td className="px-6 py-4 font-medium text-slate-800">
                       <div className="flex items-center gap-2">
                         <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-xs font-semibold text-slate-700">
-                          {getPropertyDisplay(pkg.propertyId)}
+                          {getPropertyDisplay(pkg.propertyId, pkg.propertyName)}
                         </span>
 
                       </div>
@@ -508,13 +515,15 @@ export const SecurityPackages = () => {
                         >
                           <Edit className="w-4 h-4" />
                         </button>
-                        <button 
-                          onClick={() => handleDelete(pkg.id, pkg.recipientName)}
-                          className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                          title="Eliminar registro"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {pkg.status !== 'DELIVERED' && (
+                          <button 
+                            onClick={() => handleDelete(pkg.id, pkg.recipientName, pkg.status)}
+                            className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="Eliminar registro"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -648,6 +657,8 @@ export const SecurityPackages = () => {
                     <option value="Inter Rapidísimo">Inter Rapidísimo</option>
                     <option value="FedEx">FedEx</option>
                     <option value="DHL">DHL</option>
+                    <option value="Rappi">Rappi</option>
+                    <option value="Didi">Didi</option>
                     <option value="Otro">Otro</option>
                   </select>
                 </FormField>
@@ -764,6 +775,8 @@ export const SecurityPackages = () => {
                   <option value="Inter Rapidísimo">Inter Rapidísimo</option>
                   <option value="FedEx">FedEx</option>
                   <option value="DHL">DHL</option>
+                  <option value="Rappi">Rappi</option>
+                  <option value="Didi">Didi</option>
                   <option value="Otro">Otro / Mensajería Local</option>
                 </select>
               </div>

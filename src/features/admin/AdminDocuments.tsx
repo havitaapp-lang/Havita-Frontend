@@ -69,9 +69,9 @@ export const AdminDocuments = () => {
     setFormData({
       title: '',
       category: 'Reglamento',
-      fileSize: '1.8 MB',
+      fileSize: '25 MB',
       fileType: 'PDF',
-      fileName: 'reglamento_limonar_2026.pdf',
+      fileName: 'documento.pdf',
       description: ''
     });
     setErrors({});

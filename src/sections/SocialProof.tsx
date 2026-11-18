@@ -1,23 +1,30 @@
 import React from 'react';
 import { Testimonial } from '../components/Testimonial';
 
-export const SocialProof: React.FC = () => {
+interface SocialProofProps {
+  onOpenDemo?: () => void;
+}
+
+export const SocialProof: React.FC<SocialProofProps> = ({ onOpenDemo }) => {
   return (
-    <section id="social-proof" className="py-20 sm:py-28 bg-white relative">
+    <section id="pioneer-program" className="py-20 sm:py-28 bg-white relative">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Subtle section label */}
         <div className="text-center mb-12">
-          <span className="text-xs font-bold uppercase tracking-wider text-[var(--tenant-primary)] bg-blue-50 px-3 py-1 rounded-full">
-            Prueba social y confianza
+          <span className="text-xs font-bold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200/60 px-3.5 py-1 rounded-full">
+            Confianza, Garantías y Respaldo Institucional
           </span>
-          <h2 className="text-2xl sm:text-3xl font-black text-[#16345F] mt-3 tracking-tight">
-            Comunidades que ya transformaron su día a día
+          <h2 className="text-3xl sm:text-4xl font-black text-[#16345F] mt-3 tracking-tight">
+            Diseñado para la realidad de la propiedad horizontal en Colombia
           </h2>
+          <p className="text-base text-slate-500 max-w-2xl mx-auto mt-2">
+            Elimina riesgos legales y dolores de cabeza operativos con una plataforma construida en cumplimiento de las leyes colombianas.
+          </p>
         </div>
 
-        {/* Testimonial & Metrics component */}
-        <Testimonial />
+        {/* Pioneer Program & Compliance Component */}
+        <Testimonial onOpenDemo={onOpenDemo} />
 
       </div>
     </section>

@@ -88,16 +88,18 @@ export const AddPersonalModal: React.FC<AddPersonalModalProps> = ({
         setLoginEmail(cleanEmail);
       }
 
-      // Ajustar rol por defecto inteligente según área
+      // Ajustar rol por defecto inteligente según área. SEC-9: solo se sugiere un rol que el servidor ofrezca
+      // (la administración de comunidad únicamente asigna STAFF o SECURITY); si no, STAFF.
+      const pick = (code: SystemRole): SystemRole => (availableRoles.some(r => r.code === code) ? code : 'STAFF');
       if (area === 'Seguridad' || area === 'Portería') {
         setSystemRole('SECURITY');
         setAssignedGate('Portería principal');
       } else if (area === 'Administración') {
-        setSystemRole('COMMUNITY_ADMIN');
+        setSystemRole(pick('COMMUNITY_ADMIN'));
       } else if (area === 'MAINTENANCE' || area === 'Aseo') {
         setSystemRole('STAFF');
       } else {
-        setSystemRole('READ_ONLY');
+        setSystemRole(pick('READ_ONLY'));
       }
 
       // Si no tiene contraseña aún y está habilitado el acceso, autogenerar una inicial

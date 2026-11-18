@@ -2,29 +2,31 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" href="/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
-    <title>Havita — SaaS de Administración para Copropiedades y Condominios</title>
+    <title>Havita — Software para Administración de Propiedad Horizontal y Conjuntos Residenciales</title>
     
     <!-- SEO Primary Meta Tags -->
-    <meta name="title" content="Havita — Plataforma Integral para Copropiedades y Unidades Residenciales" />
-    <meta name="description" content="Digitaliza la administración, control de accesos, paquetería, reservas y convivencia de conjuntos cerrados y edificios residenciales en Colombia y Latinoamérica." />
-    <meta name="keywords" content="proptech, administracion propiedad horizontal colombia, conjuntos residenciales, citofonia virtual, porteria, edificios inteligentes, SaaS condominios" />
-    <meta name="author" content="Havita Software SAS" />
-    <meta name="theme-color" content="#1849A9" />
+    <link rel="canonical" href="https://havita.com.co/" />
+    <meta name="title" content="Havita — Software para Copropiedades y Propiedad Horizontal en Colombia" />
+    <meta name="description" content="Digitaliza tu copropiedad bajo la Ley 675: asambleas digitales con cálculo de quórum, citofonía virtual WebRTC sin cables, control de visitas QR y paquetería en tiempo real." />
+    <meta name="keywords" content="administracion propiedad horizontal colombia, software conjuntos residenciales, citofonia virtual webrtc, asambleas virtuales ley 675, control acceso porteria, app conjuntos cerrados bogota medellin cali" />
+    <meta name="author" content="Havita SaaS" />
+    <meta name="theme-color" content="#16345F" />
 
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://havita.co/" />
-    <meta property="og:title" content="Havita — SaaS de Gestión Residencial" />
-    <meta property="og:description" content="Digitaliza la administración, visitantes, paquetes y reservas de tu conjunto residencial en una sola plataforma moderna." />
+    <meta property="og:url" content="https://havita.com.co/" />
+    <meta property="og:title" content="Havita — Plataforma para Copropiedades y Propiedad Horizontal" />
+    <meta property="og:description" content="Asambleas digitales bajo Ley 675, citofonía virtual WebRTC sin cables y gestión integral de residentes en Colombia." />
     <meta property="og:image" content="/og-image.png" />
 
     <!-- Twitter -->
     <meta property="twitter:card" content="summary_large_image" />
-    <meta property="twitter:url" content="https://havita.co/" />
+    <meta property="twitter:url" content="https://havita.com.co/" />
     <meta property="twitter:title" content="Havita — SaaS de Gestión Residencial" />
-    <meta property="twitter:description" content="Digitaliza la administración, visitantes, paquetes y reservas de tu conjunto residencial." />
+    <meta property="twitter:description" content="Asambleas digitales bajo Ley 675, citofonía virtual WebRTC sin cables y gestión de copropiedades." />
     <meta property="twitter:image" content="/og-image.png" />
 
     <!-- PWA -->
@@ -35,9 +37,23 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
 
-    <!-- Preconnect Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- JSON-LD Structured Data for B2B SaaS -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Havita",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web, iOS, Android (PWA)",
+      "offers": {
+        "@type": "Offer",
+        "price": "3000",
+        "priceCurrency": "COP",
+        "description": "Desde $3.000 COP al mes por apartamento, con todos los módulos incluidos"
+      },
+      "description": "Plataforma integral para copropiedades residenciales en Colombia: asambleas con quórum Ley 675, citofonía virtual WebRTC, control de accesos QR y paquetería."
+    }
+    </script>
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased selection:bg-blue-600 selection:text-white">
     <div id="root"></div>

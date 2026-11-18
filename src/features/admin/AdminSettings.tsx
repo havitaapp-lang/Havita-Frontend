@@ -154,16 +154,20 @@ export const AdminSettings = () => {
                     />
                   </FormField>
 
-                  <FormField id="subdomain" label="Subdominio">
+                  <FormField 
+                    id="subdomain" 
+                    label="Subdominio"
+                    helperText="El subdominio no puede ser modificado por administradores de copropiedad."
+                  >
                     <div className="flex items-center">
                       <Input 
                         id="subdomain" 
-                        maxLength={FIELD_LIMITS.SUBDOMAIN_MAX_LENGTH}
                         value={formData.subdomain}
-                        onChange={(e) => setFormData({ ...formData, subdomain: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, FIELD_LIMITS.SUBDOMAIN_MAX_LENGTH) })}
-                        className="rounded-l-xl rounded-r-none border-slate-200 font-mono text-xs" 
+                        readOnly
+                        disabled
+                        className="rounded-l-xl rounded-r-none border-slate-200 bg-slate-100 text-slate-500 font-mono text-xs cursor-not-allowed select-none" 
                       />
-                      <span className="bg-slate-100 border border-l-0 border-slate-200 px-2.5 py-2 h-10 flex items-center rounded-r-xl text-xs text-slate-500 font-mono">
+                      <span className="bg-slate-100 border border-l-0 border-slate-200 px-2.5 py-2 h-10 flex items-center rounded-r-xl text-xs text-slate-400 font-mono">
                         .havita.com
                       </span>
                     </div>
@@ -171,8 +175,8 @@ export const AdminSettings = () => {
                 </div>
 
                 {/* Color pickers */}
-                <div className="grid grid-cols-2 gap-4 pt-2">
-                  <div className="grid gap-1.5">
+                <div className="pt-2">
+                  <div className="grid gap-1.5 max-w-xs">
                     <Label className="text-xs font-bold text-slate-700">Color Primario</Label>
                     <div className="flex gap-2 items-center">
                       <input 
@@ -186,25 +190,6 @@ export const AdminSettings = () => {
                         maxLength={7}
                         value={formData.primaryColor}
                         onChange={(e) => setFormData({ ...formData, primaryColor: e.target.value.slice(0, 7) })}
-                        className="font-mono text-xs uppercase rounded-xl border-slate-200"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid gap-1.5">
-                    <Label className="text-xs font-bold text-slate-700">Color Secundario</Label>
-                    <div className="flex gap-2 items-center">
-                      <input 
-                        type="color" 
-                        value={formData.secondaryColor}
-                        onChange={(e) => setFormData({ ...formData, secondaryColor: e.target.value })}
-                        className="w-10 h-10 rounded-xl border border-slate-200 cursor-pointer p-0.5"
-                      />
-                      <Input 
-                        type="text" 
-                        maxLength={7}
-                        value={formData.secondaryColor}
-                        onChange={(e) => setFormData({ ...formData, secondaryColor: e.target.value.slice(0, 7) })}
                         className="font-mono text-xs uppercase rounded-xl border-slate-200"
                       />
                     </div>
@@ -294,7 +279,7 @@ export const AdminSettings = () => {
                         <div className="w-6 h-6 rounded-md" style={{ backgroundColor: formData.primaryColor, opacity: 0.3 }}></div>
                       </div>
                       <div className="h-12 bg-white rounded-xl shadow-xs border border-slate-100 flex items-center justify-center">
-                        <div className="w-6 h-6 rounded-md" style={{ backgroundColor: formData.secondaryColor, opacity: 0.3 }}></div>
+                        <div className="w-6 h-6 rounded-md bg-slate-200"></div>
                       </div>
                     </div>
                     

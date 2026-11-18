@@ -7,8 +7,7 @@ import {
   ClipboardList,
   LogOut,
   ChevronRight,
-  RotateCcw,
-  Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { shiftService } from '../../personal/services/shiftService';
@@ -22,8 +21,8 @@ import { notificationService } from '../../../services/notificationService';
 
 export const GuardShiftWidget: React.FC = () => {
   const { user } = useAuth();
-  const guardId = user?.id || 'pers-001';
-  const guardName = user?.name || 'Carlos Rodríguez';
+  const guardId = user?.id || '';
+  const guardName = user?.name || 'Guarda de Seguridad';
 
   const [shift, setShift] = useState<Shift | null>(null);
   const [record, setRecord] = useState<AttendanceRecord | null>(null);
@@ -32,7 +31,9 @@ export const GuardShiftWidget: React.FC = () => {
     today: Shift[];
     tomorrow: Shift[];
     thisWeek: Shift[];
-  }>({ today: [], tomorrow: [], thisWeek: [] });
+    allShifts?: Shift[];
+  }>({ today: [], tomorrow: [], thisWeek: [], allShifts: [] });
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Modals
   const [isClockInOpen, setIsClockInOpen] = useState(false);
@@ -40,32 +41,52 @@ export const GuardShiftWidget: React.FC = () => {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isUpcomingOpen, setIsUpcomingOpen] = useState(false);
 
-  // Time simulation state (default: 05:57 AM for prompt demo)
-  const [simulatedTime, setSimulatedTime] = useState<string>('05:57');
-  const [demoMode, setDemoMode] = useState<'early' | 'ontime' | 'late' | 'noturn' | 'custom'>('early');
-  const [elapsedMinutes, setElapsedMinutes] = useState<number>(204); // Default 3h 24m for demo prompt
-  const [hasNoShift, setHasNoShift] = useState(false);
+  // Real-time Clock
+  const getCurrentTimeStr = () => {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2, '0');
+    const m = String(now.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  };
 
-  // Load shift and attendance data
+  const [currentTime, setCurrentTime] = useState<string>(getCurrentTimeStr());
+  const [elapsedMinutes, setElapsedMinutes] = useState<number>(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(getCurrentTimeStr());
+    }, 10000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Load shift and attendance data directly from backend
   const loadGuardShift = useCallback(async () => {
-    if (hasNoShift) {
-      setShift(null);
-      return;
+    try {
+      const current = await shiftService.getMyCurrentShift(guardId);
+      setShift(current);
+
+      if (current) {
+        const rec = await attendanceService.getRecordForShift(current.id, current.memberId || guardId);
+        setRecord(rec || null);
+      } else {
+        setRecord(null);
+      }
+
+      const myHistory = await attendanceService.getMyAttendance(guardId);
+      setHistoryRecords(myHistory);
+
+      const up = await shiftService.getMyUpcomingShifts(guardId);
+      setUpcomingShifts(up);
+    } catch (err) {
+      console.error('Error loading guard shift and attendance:', err);
     }
-    const current = await shiftService.getMyCurrentShift(guardId);
-    setShift(current);
+  }, [guardId]);
 
-    if (current) {
-      const rec = await attendanceService.getRecordForShift(current.id, guardId);
-      setRecord(rec || null);
-    }
-
-    const myHistory = await attendanceService.getMyAttendance(guardId);
-    setHistoryRecords(myHistory);
-
-    const up = await shiftService.getMyUpcomingShifts(guardId);
-    setUpcomingShifts(up);
-  }, [guardId, hasNoShift]);
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    await loadGuardShift();
+    setTimeout(() => setIsRefreshing(false), 500);
+  };
 
   useEffect(() => {
     loadGuardShift();
@@ -83,17 +104,26 @@ export const GuardShiftWidget: React.FC = () => {
   // Live timer for elapsed time when on duty
   useEffect(() => {
     if (record?.checkIn && !record.checkOut) {
-      const timer = setInterval(() => {
-        setElapsedMinutes((prev) => prev + 1);
-      }, 60000);
-      return () => clearInterval(timer);
+      const calculateElapsed = () => {
+        const checkInDate = new Date();
+        if (record.checkIn?.includes(':')) {
+          const [h, m] = record.checkIn.split(':').map(Number);
+          checkInDate.setHours(h, m, 0, 0);
+        }
+        const diffMs = Math.max(0, Date.now() - checkInDate.getTime());
+        setElapsedMinutes(Math.floor(diffMs / 60000));
+      };
+
+      calculateElapsed();
+      const interval = setInterval(calculateElapsed, 60000);
+      return () => clearInterval(interval);
     }
   }, [record?.checkIn, record?.checkOut]);
 
   // Helpers for formatting
   const formatGreeting = () => {
     const hours = new Date().getHours();
-    const firstName = guardName.split(' ')[0] || 'Carlos';
+    const firstName = guardName.split(' ')[0] || 'Guarda';
     if (hours < 12) return `Buenos días, ${firstName}`;
     if (hours < 18) return `Buenas tardes, ${firstName}`;
     return `Buenas noches, ${firstName}`;
@@ -105,77 +135,58 @@ export const GuardShiftWidget: React.FC = () => {
     return `${String(h).padStart(2, '0')}h ${String(m).padStart(2, '0')}m`;
   };
 
-  // Check shift timing relative to scheduled start (06:00)
+  // Check shift timing relative to scheduled start
   const scheduledStart = shift?.startTime || '06:00';
-  const isEarly = simulatedTime < scheduledStart;
-  const isLate = simulatedTime > scheduledStart;
+  const isEarly = currentTime < scheduledStart;
+  const isLate = currentTime > scheduledStart;
   const diffMinutes = Math.abs(
-    parseInt(simulatedTime.split(':')[0], 10) * 60 +
-      parseInt(simulatedTime.split(':')[1], 10) -
+    parseInt(currentTime.split(':')[0], 10) * 60 +
+      parseInt(currentTime.split(':')[1], 10) -
       (parseInt(scheduledStart.split(':')[0], 10) * 60 + parseInt(scheduledStart.split(':')[1], 10))
   );
 
   // Status determination
   const isClockedIn = Boolean(record?.checkIn && !record?.checkOut);
-  const isCompleted = Boolean(record?.checkIn && record?.checkOut);
+  const isCompleted = Boolean(record?.checkIn && record?.checkOut) || shift?.status === 'COMPLETADO';
 
-  // Actions
-  const handleConfirmClockIn = async (actualTime: string = simulatedTime, wasLate?: boolean) => {
+  // Actions connecting directly to backend
+  const handleConfirmClockIn = async (actualTime: string = currentTime, wasLate?: boolean) => {
     if (!shift) return;
-    await attendanceService.clockIn({
-      shiftId: shift.id,
-      memberId: guardId,
-      actualTime,
-      isLate: wasLate ?? isLate,
-    });
-    setIsClockInOpen(false);
-    notificationService.showToast(
-      `✓ Entrada registrada (${actualTime}). ¡Buen turno!`,
-      'success'
-    );
-    loadGuardShift();
+    try {
+      await attendanceService.clockIn({
+        shiftId: shift.id,
+        memberId: shift.memberId || guardId,
+        gate: typeof shift.gate === 'string' ? shift.gate : 'Portería Principal',
+        actualTime,
+        isLate: wasLate ?? isLate,
+      });
+      setIsClockInOpen(false);
+      notificationService.showToast(
+        `✓ Entrada registrada (${actualTime}). ¡Buen turno!`,
+        'success'
+      );
+      await loadGuardShift();
+    } catch (err: any) {
+      notificationService.showError('Error', err?.message || 'No se pudo registrar la entrada');
+    }
   };
 
-  const handleConfirmClockOut = async (actualExitTime: string = '18:03') => {
+  const handleConfirmClockOut = async (actualExitTime: string = currentTime) => {
     if (!shift) return;
-    await attendanceService.clockOut({
-      shiftId: shift.id,
-      memberId: guardId,
-      actualTime: actualExitTime,
-    });
-    setIsClockOutOpen(false);
-    notificationService.showToast(
-      `✓ Turno completado exitosamente (${actualExitTime}).`,
-      'success'
-    );
-    loadGuardShift();
-  };
-
-  const handleResetDemo = () => {
-    setHasNoShift(false);
-    setDemoMode('early');
-    setSimulatedTime('05:57');
-    setElapsedMinutes(204);
-    shiftService.resetDemoData();
-    attendanceService.resetDemoData();
-    notificationService.showToast('Datos de prueba reiniciados al estado inicial', 'info');
-    loadGuardShift();
-  };
-
-  const applyDemoScenario = (scenario: 'early' | 'ontime' | 'late' | 'noturn') => {
-    setDemoMode(scenario);
-    if (scenario === 'early') {
-      setHasNoShift(false);
-      setSimulatedTime('05:52');
-    } else if (scenario === 'ontime') {
-      setHasNoShift(false);
-      setSimulatedTime('06:00');
-    } else if (scenario === 'late') {
-      setHasNoShift(false);
-      setSimulatedTime('06:18');
-    } else if (scenario === 'noturn') {
-      setHasNoShift(true);
-      setShift(null);
+    try {
+      await attendanceService.clockOut({
+        shiftId: shift.id,
+        memberId: shift.memberId || guardId,
+        actualTime: actualExitTime,
+      });
+      setIsClockOutOpen(false);
+      notificationService.showToast(
+        `✓ Turno completado exitosamente (${actualExitTime}).`,
+        'success'
+      );
+      await loadGuardShift();
+    } catch (err: any) {
+      notificationService.showError('Error', err?.message || 'No se pudo registrar la salida');
     }
   };
 
@@ -194,12 +205,21 @@ export const GuardShiftWidget: React.FC = () => {
             {formatGreeting()}
           </h2>
           <p className="text-xs text-slate-500">
-            {shift ? 'Este es tu turno de hoy' : 'Consulta tu asignación operativa'}
+            {shift ? 'Este es tu turno programado en el sistema' : 'Consulta tu asignación operativa'}
           </p>
         </div>
 
-        {/* Quick Modals Triggers (Mis marcaciones & Próximos turnos) */}
+        {/* Quick Modals Triggers (Mis marcaciones & Próximos turnos & Refresh) */}
         <div className="flex items-center gap-2 self-start sm:self-center">
+          <button
+            type="button"
+            onClick={handleManualRefresh}
+            title="Refrescar estado de turno"
+            className="p-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-slate-900 shadow-2xs transition-all cursor-pointer min-h-[44px] flex items-center justify-center"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-600' : ''}`} />
+          </button>
+
           <button
             type="button"
             onClick={() => setIsUpcomingOpen(true)}
@@ -223,7 +243,7 @@ export const GuardShiftWidget: React.FC = () => {
       {/* Main Shift Operational Area */}
       <div className="p-5 sm:p-6">
         {/* CASE 1: NO SHIFT TODAY */}
-        {!shift || hasNoShift ? (
+        {!shift ? (
           <div className="p-6 text-center space-y-4 bg-slate-50 rounded-2xl border border-slate-200/80">
             <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
               <CalendarDays className="w-7 h-7" />
@@ -262,6 +282,11 @@ export const GuardShiftWidget: React.FC = () => {
                     <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
                     {shift.gate || 'Portería Principal'}
                   </span>
+                  {shift.shiftName && (
+                    <span className="text-xs text-slate-400">
+                      ({shift.shiftName})
+                    </span>
+                  )}
                 </div>
 
                 {/* Status Indicator Badge */}
@@ -305,7 +330,7 @@ export const GuardShiftWidget: React.FC = () => {
                     <div className="p-3 bg-white/10 rounded-2xl text-left">
                       <span className="text-[10px] text-slate-300 block">Entrada registrada</span>
                       <span className="font-mono font-bold text-emerald-400 text-sm">
-                        {record?.checkIn || '05:57 AM'}
+                        {record?.checkIn || currentTime}
                       </span>
                     </div>
 
@@ -323,14 +348,14 @@ export const GuardShiftWidget: React.FC = () => {
                     <div className="p-3 bg-white/10 rounded-2xl text-left">
                       <span className="text-[10px] text-slate-300 block">Entrada</span>
                       <span className="font-mono font-bold text-emerald-400 text-sm">
-                        {record?.checkIn || '05:57 AM'}
+                        {record?.checkIn || shift.startTime}
                       </span>
                     </div>
 
                     <div className="p-3 bg-white/10 rounded-2xl text-left">
                       <span className="text-[10px] text-slate-300 block">Salida</span>
                       <span className="font-mono font-bold text-amber-300 text-sm">
-                        {record?.checkOut || '06:03 PM'}
+                        {record?.checkOut || shift.endTime}
                       </span>
                     </div>
                   </>
@@ -354,10 +379,10 @@ export const GuardShiftWidget: React.FC = () => {
 
                   <div className="flex items-center justify-between text-xs text-slate-500 px-1">
                     <span>
-                      Hora a registrar: <strong className="font-mono text-slate-800">{simulatedTime}</strong>
+                      Hora a registrar: <strong className="font-mono text-slate-800">{currentTime}</strong>
                     </span>
                     <span className="text-[11px] text-slate-400">
-                      Toca el botón para abrir la confirmación instantánea
+                      Toca el botón para registrar la entrada en el sistema
                     </span>
                   </div>
                 </div>
@@ -378,7 +403,7 @@ export const GuardShiftWidget: React.FC = () => {
                   <div className="flex items-center justify-between text-xs text-slate-500 px-1">
                     <span className="flex items-center gap-1.5 text-emerald-700 font-semibold">
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      En puesto desde las {record?.checkIn || '05:57 AM'}
+                      En puesto desde las {record?.checkIn || shift.startTime}
                     </span>
                     <span className="text-[11px] text-slate-400">
                       Salida programada: {shift.endTime}
@@ -397,7 +422,7 @@ export const GuardShiftWidget: React.FC = () => {
                         ✓ Turno completado y cerrado con éxito
                       </p>
                       <p className="text-emerald-700 text-xs mt-0.5">
-                        Marcación bloqueada para evitar duplicados. Tu asistencia ya está reflejada en la administración.
+                        Marcación registrada en la base de datos de la administración.
                       </p>
                     </div>
                   </div>
@@ -416,70 +441,25 @@ export const GuardShiftWidget: React.FC = () => {
         )}
       </div>
 
-      {/* DISCREET DEMO TOOLBAR: Quick Scenario Tester for Evaluators */}
-      <div className="px-5 py-3 bg-slate-100/70 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs">
-        <div className="flex items-center gap-1.5 text-slate-500">
-          <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-          <span className="font-bold text-slate-700 text-[11px]">Simulador Demo:</span>
+      {/* Operational Real-time Status Footer */}
+      <div className="px-5 py-3 bg-slate-50 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex items-center gap-2 text-slate-500">
+          <Clock className="w-3.5 h-3.5 text-blue-600" />
+          <span className="font-bold text-slate-700 text-xs">Hora actual:</span>
+          <span className="font-mono font-black text-slate-900 bg-white px-2 py-0.5 rounded-md border border-slate-200 shadow-2xs">
+            {currentTime}
+          </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => applyDemoScenario('early')}
-            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-              demoMode === 'early' && !hasNoShift
-                ? 'bg-blue-600 text-white shadow-2xs'
-                : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
-            }`}
-          >
-            Anticipada (05:52 AM)
-          </button>
-
-          <button
-            type="button"
-            onClick={() => applyDemoScenario('ontime')}
-            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-              demoMode === 'ontime' && !hasNoShift
-                ? 'bg-blue-600 text-white shadow-2xs'
-                : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
-            }`}
-          >
-            Puntual (06:00 AM)
-          </button>
-
-          <button
-            type="button"
-            onClick={() => applyDemoScenario('late')}
-            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-              demoMode === 'late' && !hasNoShift
-                ? 'bg-amber-600 text-white shadow-2xs'
-                : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
-            }`}
-          >
-            Tardía (06:18 AM)
-          </button>
-
-          <button
-            type="button"
-            onClick={() => applyDemoScenario('noturn')}
-            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-              hasNoShift
-                ? 'bg-slate-800 text-white shadow-2xs'
-                : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
-            }`}
-          >
-            Sin Turno Hoy
-          </button>
-
-          <button
-            type="button"
-            onClick={handleResetDemo}
-            title="Restablecer datos originales"
-            className="p-1 rounded-lg bg-white hover:bg-slate-200 text-slate-500 hover:text-slate-900 border border-slate-200 cursor-pointer ml-1"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
+        <div className="flex items-center gap-3 text-xs text-slate-500">
+          <span className="flex items-center gap-1.5">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span className="font-medium text-slate-700">{shift?.gate || 'Portería Principal'}</span>
+          </span>
+          <span className="text-slate-300">|</span>
+          <span className="font-semibold text-slate-600">
+            {isCompleted ? '✓ Turno finalizado' : isClockedIn ? '🟢 En turno activo' : '⚪ Pendiente de inicio'}
+          </span>
         </div>
       </div>
 
@@ -491,7 +471,7 @@ export const GuardShiftWidget: React.FC = () => {
             onClose={() => setIsClockInOpen(false)}
             onConfirm={handleConfirmClockIn}
             shift={shift}
-            currentTimeStr={simulatedTime}
+            currentTimeStr={currentTime}
             isEarly={isEarly}
             isLate={isLate}
             diffMinutes={diffMinutes}
@@ -502,7 +482,7 @@ export const GuardShiftWidget: React.FC = () => {
             onClose={() => setIsClockOutOpen(false)}
             onConfirm={handleConfirmClockOut}
             shift={shift}
-            currentTimeStr="18:03"
+            currentTimeStr={currentTime}
             actualCheckIn={record?.checkIn}
             elapsedTimeString={formatElapsed(elapsedMinutes)}
           />

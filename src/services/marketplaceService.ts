@@ -77,6 +77,15 @@ export const marketplaceService = {
   deleteListing: (id: string): Promise<void> =>
     apiClient.delete<void>(`/marketplace/listings/${id}`),
 
+  hideListing: (id: string): Promise<void> =>
+    apiClient.post<void>(`/marketplace/listings/${id}/hide`, {}),
+
+  unhideListing: (id: string): Promise<MarketplaceListing> =>
+    apiClient.post<MarketplaceListing>(`/marketplace/listings/${id}/unhide`, {}),
+
+  purgeListing: (id: string): Promise<void> =>
+    apiClient.delete<void>(`/marketplace/listings/${id}/permanent`),
+
   reportListing: (id: string, data: ReportListingDto): Promise<void> =>
     apiClient.post<void>(`/marketplace/listings/${id}/report`, data),
 
@@ -112,8 +121,11 @@ export const marketplaceService = {
     rejectListing: (id: string, reason: string): Promise<MarketplaceListing> =>
       apiClient.post<MarketplaceListing>(`/admin/marketplace/listings/${id}/reject`, { reason }),
 
-    hideListing: (id: string): Promise<MarketplaceListing> =>
-      apiClient.post<MarketplaceListing>(`/admin/marketplace/listings/${id}/hide`, {}),
+    hideListing: (id: string, reason?: string): Promise<MarketplaceListing> =>
+      apiClient.post<MarketplaceListing>(`/admin/marketplace/listings/${id}/hide`, { reason }),
+
+    unhideListing: (id: string): Promise<MarketplaceListing> =>
+      apiClient.post<MarketplaceListing>(`/admin/marketplace/listings/${id}/unhide`, {}),
 
     getReports: (params?: { page?: number }): Promise<MarketplacePageResponse<MarketplaceReport>> => {
       const query = new URLSearchParams();

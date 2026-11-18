@@ -1,53 +1,82 @@
-# Seguridad en Havita
+# Protocolos y Prácticas de Seguridad en Havita
 
-**Versión:** 1.0
-**Fecha de entrada en vigencia:** 01 de Octubre de 2026
+**Versión:** 1.0  
+**Fecha de entrada en vigencia:** 05 de Noviembre de 2026  
+**Operador:** Persona Natural identificada con NIT / C.C. 1005871910 — Havita  
+**Contacto de seguridad:** seguridad@havita.com.co  
 
-En **Havita**, entendemos que la plataforma gestiona información esencial para el funcionamiento diario y la convivencia de las Copropiedades. Por ello, hemos diseñado nuestra arquitectura integrando la seguridad desde su base. 
+En **Havita**, la protección y confidencialidad de la información de las copropiedades, administraciones, residentes y visitantes es un pilar fundamental. Nuestra plataforma ha sido diseñada bajo el principio de **seguridad y privacidad desde el diseño y por defecto**.
 
-Esta página describe públicamente nuestras prácticas y controles de seguridad orientados a proteger la confidencialidad, integridad y disponibilidad de la información de su Conjunto.
-
----
-
-## 1. Arquitectura de Aislamiento (Multi-Tenancy)
-
-Havita opera bajo un modelo *Multi-Tenant* (múltiples inquilinos). Esto significa que la base de datos está diseñada con barreras estrictas de aislamiento:
-- Todo el acceso a los datos requiere invariablemente la identificación del `tenant_id` (Identificador único de su Copropiedad).
-- Los datos de su Conjunto están lógicamente aislados; un residente, vigilante o administrador de un Conjunto "A" no tiene forma alguna de consultar, modificar o visualizar los registros del Conjunto "B".
-
-## 2. Autenticación y Autorización
-
-Implementamos esquemas rigurosos para validar quién accede al sistema y qué puede hacer:
-- **Contraseñas Seguras:** Las contraseñas de los usuarios no se almacenan en texto plano. Se procesan a través de algoritmos de hashing fuertes antes de ser guardadas, haciéndolas ilegibles incluso para nuestros administradores de base de datos.
-- **Sesiones mediante Tokens (JWT):** Las sesiones de los usuarios se manejan utilizando *JSON Web Tokens* (JWT), con un esquema de refresco de tokens, lo que minimiza el impacto en caso de que una sesión quede expuesta en un dispositivo público.
-- **Control de Acceso Basado en Roles (RBAC):** El sistema asigna niveles de acceso granulares. Un perfil de "Guarda de Seguridad" tiene una vista limitada orientada al control físico, mientras que un "Propietario" solo ve sus datos y un "Administrador" tiene privilegios de gestión de la comunidad.
-
-## 3. Protección en Tránsito
-
-Toda la comunicación entre su dispositivo (navegador o celular) y nuestros servidores se encuentra cifrada de extremo a extremo utilizando los protocolos modernos de encriptación (TLS/HTTPS). Esto evita que terceros puedan interceptar o leer información como contraseñas, chats o datos de residentes mientras viajan por internet.
-
-## 4. Almacenamiento de Archivos y Documentos
-
-Los documentos cargados en los módulos (como actas, comprobantes o anexos de PQRS) se almacenan utilizando servicios de almacenamiento en la nube (como Cloudflare R2 / Local Storage) que no son indexados por motores de búsqueda públicos y solo se exponen mediante la Plataforma.
-
-## 5. Códigos QR y Control de Acceso
-
-- Los códigos QR generados por la plataforma para autorizar visitas son **temporales y dinámicos**, contando con un tiempo de expiración programado (por defecto 12 horas).
-- Un trabajo automatizado (cronjob) revoca los permisos y el estado del código cuando el tiempo culmina, evitando que sean reutilizados al día siguiente o distribuidos a terceros.
-
-## 6. Disponibilidad y Backups
-
-Aplicamos políticas de respaldo de la información (backups) de la base de datos transaccional, lo que nos permite asegurar la continuidad del negocio y la recuperación de desastres frente a eventualidades técnicas imprevistas.
-
-## 7. Reporte de Vulnerabilidades
-
-La seguridad es un proceso en constante evolución. Si usted es un investigador de seguridad, residente o administrador y cree haber encontrado una vulnerabilidad técnica en la plataforma Havita, le agradecemos reportarla de manera responsable.
-
-Por favor, no publique los hallazgos de forma abierta ni escanee agresivamente nuestros entornos. Envíe los detalles de la vulnerabilidad a:
-📧 **[EMAIL DE SEGURIDAD]**
-
-Nuestro equipo de ingeniería evaluará el reporte e implementará las correcciones necesarias de forma prioritaria.
+El presente documento describe públicamente los controles técnicos, arquitectónicos y organizativos implementados para salvaguardar la confidencialidad, integridad y disponibilidad de los datos.
 
 ---
 
-*Nota: Havita implementa medidas razonables de seguridad alineadas a estándares de la industria tecnológica. Sin embargo, ningún sistema de software conectado a internet está exento de riesgos, por lo cual alentamos a todos los usuarios a utilizar contraseñas fuertes y proteger sus dispositivos personales.*
+## 1. Arquitectura de Aislamiento Lógico (Multi-Tenancy)
+
+Havita opera bajo un modelo de software multi-inquilino (*Multi-Tenant*) con barreras estrictas de segregación:
+
+*   **Identificador Obligatorio de Copropiedad:** Todo registro transaccional y consulta en base de datos está obligatoriamente vinculado a un identificador único de copropiedad (`tenant_id`).
+*   **Aislamiento Lógico:** Los datos de cada conjunto residencial están lógicamente aislados a nivel de aplicación y persistencia. Un residente, vigilante o administrador de una copropiedad no tiene capacidad técnica de consultar, visualizar ni modificar información perteneciente a otra copropiedad.
+*   **Validación Criptográfica y de Ámbito:** Los componentes de seguridad (`AuthorizationResolver`, `AccessValidator`) verifican en cada petición HTTP que el usuario posea una membresía activa y legítima en la copropiedad consultada.
+
+---
+
+## 2. Autenticación, Sesiones y Control de Acceso (RBAC)
+
+Implementamos esquemas rigurosos para validar la identidad de los usuarios y restringir privilegios:
+
+*   **Contraseñas Seguras y Hashing Fuerte:** Las contraseñas de los usuarios nunca se almacenan en texto plano. Se procesan mediante el algoritmo criptográfico estándar de la industria **BCrypt**, haciéndolas irreversibles e ilegibles incluso para los administradores del sistema.
+*   **Tokens Criptográficos de Sesión (JWT):** Las sesiones se gestionan mediante *JSON Web Tokens* (JWT) firmados digitalmente, complementados con un esquema de tokens de refresco (*Refresh Tokens*) que permite la revocación inmediata de sesiones activas en caso de cierre de sesión o cambio de credenciales.
+*   **Control de Acceso Basado en Roles (RBAC):** Se aplican niveles de acceso granulares según el perfil asignado (`SUPER_ADMIN`, `COMMUNITY_ADMIN`, `SECURITY`, `STAFF`, `RESIDENT`). Por ejemplo, el personal de portería cuenta con vistas operativas circunscritas al control de acceso y paquetería, sin acceso a información privada no requerida para su función.
+
+---
+
+## 3. Seguridad en Tránsito y Protección de Red
+
+*   **Cifrado TLS/HTTPS:** Toda la comunicación entre los dispositivos de los usuarios (navegadores web o teléfonos móviles) y los servidores de Havita viaja cifrada mediante protocolos criptográficos modernos (TLS 1.2 / TLS 1.3 y HTTPS), protegiendo la información frente a interceptaciones de terceros.
+*   **Protección Perimetral y Mitigación DDoS:** La plataforma cuenta con capas de protección perimetral mediante redes de distribución de contenido (CDN) que mitigan ataques de denegación de servicio (DDoS) y filtran tráfico malicioso.
+
+---
+
+## 4. Almacenamiento y Protección de Archivos Adjuntos
+
+*   **Estructura de Almacenamiento Aislada:** Los documentos cargados en la plataforma (comprobantes de reserva, anexos de PQRS, actas o imágenes de publicaciones) se almacenan en rutas estructuradas y aisladas por copropiedad (`/tenants/{tenantId}/...`).
+*   **Protección contra Path Traversal:** El servicio de almacenamiento sanea de forma estricta los nombres de archivo y las rutas relativas para prevenir ataques de escape de directorio o acceso no autorizado a archivos del servidor.
+*   **No Indexación Pública:** Los archivos privados de la comunidad no son indexados por motores de búsqueda públicos y su descarga requiere la validación de acceso correspondiente a través de la plataforma.
+
+---
+
+## 5. Códigos QR y Control de Acceso Físico
+
+*   **Códigos QR Temporales y Dinámicos:** Los códigos QR emitidos para autorizar el ingreso de visitantes tienen una ventana de validez programada y una expiración por defecto de 12 horas.
+*   **Revocación Automatizada:** Un proceso programado en segundo plano (*cronjob*) evalúa periódicamente las visitas pendientes y expira automáticamente los pases cuya vigencia haya culminado, impidiendo su reutilización o redistribución posterior.
+*   **Pases Públicos de Consulta:** La visualización del pase para el visitante opera mediante tokens únicos ofuscados que exponen únicamente los datos indispensables para la validación en portería.
+
+---
+
+## 6. Citofonía Digital en Tiempo Real
+
+*   **Comunicaciones Directas sin Grabación:** La citofonía digital opera mediante transmisiones de audio en tiempo real apoyadas en tecnología WebRTC. Havita **no graba, no procesa ni almacena** los archivos de audio de las conversaciones.
+*   **Trazabilidad de Metadatos:** Únicamente se conservan registros técnicos no sonoros de la llamada (identificador, hora de timbrado, respuesta, duración y unidades involucradas) para fines de auditoría y seguridad de la portería.
+
+---
+
+## 7. Disponibilidad, Respaldos y Auditoría
+
+*   **Respaldos Periódicos:** Se ejecutan políticas de copia de seguridad (*backups*) de las bases de datos transaccionales para asegurar la resiliencia operativa y la recuperación ante desastres.
+*   **Auditoría de Eventos Críticos:** El sistema registra bitácoras de auditoría sobre eventos administrativos clave (creación de usuarios, cambios de membresía, asignación de inmuebles y configuraciones comunitarias) para garantizar la rendición de cuentas.
+
+---
+
+## 8. Reporte y Divulgación Responsable de Vulnerabilidades
+
+La seguridad de la información es un proceso de mejora continua. Si usted es un investigador de seguridad, usuario o administrador y considera haber detectado una vulnerabilidad técnica en Havita, le invitamos a comunicarla de forma responsable:
+
+*   Por favor, no divulgue públicamente la vulnerabilidad ni ejecute escaneos destructivos contra la infraestructura.
+*   Envíe los detalles técnicos del hallazgo a:  
+    📧 **seguridad@havita.com.co**
+*   Nuestro equipo técnico acusará recibo, evaluará la severidad del reporte e implementará las mitigaciones pertinentes con la máxima prioridad.
+
+---
+
+*Nota: Havita implementa medidas razonables y proporcionales conforme a los estándares de la industria del software. No obstante, ningún sistema conectado a internet es absolutamente infalible. Recomendamos a todos los usuarios mantener contraseñas robustas y proteger sus dispositivos personales.*

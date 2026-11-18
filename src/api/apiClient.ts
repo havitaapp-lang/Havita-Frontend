@@ -3,10 +3,34 @@
  * Handles tenant header injection, auth bearer token, automatic token refresh, unified error interception, and timeout.
  */
 import { removeSSOCookie, getSSOCookie, setSSOCookie } from '../utils/cookieUtils';
+import {
+  activeUnitStore,
+  UNIT_SELECTION_REQUIRED_EVENT,
+  UNIT_UNAVAILABLE_EVENT,
+} from '../features/resident/unit/activeUnitStore';
 
-export interface RequestOptions extends RequestInit {
+/**
+ * Fase 2 / E2: opción de las peticiones que operan sobre una unidad del residente. Solo los servicios cuyo contrato
+ * usa la unidad seleccionada (`/resident/me/**`, `POST /realtime/panic`) la pasan: la cabecera `X-Property-Id` ya no
+ * se envía en todas las peticiones. El valor se fija al iniciar la petición y se reutiliza en su reintento, así que una
+ * petición iniciada para la unidad A nunca sale con la unidad B aunque el usuario cambie de unidad mientras tanto.
+ */
+export interface UnitRequestOptions {
+  unitId?: string | null;
+}
+
+export interface RequestOptions extends RequestInit, UnitRequestOptions {
   params?: Record<string, string | number | boolean | undefined | null>;
   _retried?: boolean;
+}
+
+/** Códigos del resolvedor de unidades (E1): nunca cierran la sesión. */
+export const UNIT_ERROR_CODES = ['UNIT_NOT_AVAILABLE', 'UNIT_SELECTION_REQUIRED', 'INVALID_UNIT_ID'] as const;
+
+/** Código de error del backend de un ApiError (o undefined). */
+export function apiErrorCode(err: unknown): string | undefined {
+  const data = (err as { data?: { code?: unknown } } | null)?.data;
+  return typeof data?.code === 'string' ? data.code : undefined;
 }
 
 export class ApiError extends Error {
@@ -90,7 +114,7 @@ class ApiClient {
     return this.refreshPromise;
   }
 
-  private getHeaders(): HeadersInit {
+  private getHeaders(unitId?: string | null): HeadersInit {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
@@ -107,6 +131,14 @@ class ApiClient {
           if (tenant?.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenant.id)) {
             headers['X-Tenant-ID'] = tenant.id;
           }
+        } else {
+          const savedUser = localStorage.getItem('havita_user');
+          if (savedUser) {
+            const user = JSON.parse(savedUser);
+            if (user?.tenantId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.tenantId)) {
+              headers['X-Tenant-ID'] = user.tenantId;
+            }
+          }
         }
       }
     } catch {
@@ -119,9 +151,9 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${accessToken}`;
     }
 
-    const propertyId = localStorage.getItem('havita_active_property');
-    if (propertyId) {
-      headers['X-Property-Id'] = propertyId;
+    // Fase 2 / E2: solo en las peticiones que declaran su unidad (ver UnitRequestOptions).
+    if (unitId) {
+      headers['X-Property-Id'] = unitId;
     }
 
     return headers;
@@ -141,13 +173,13 @@ class ApiClient {
   }
 
   async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-    const { params, _retried, ...customConfig } = options;
+    const { params, _retried, unitId, ...customConfig } = options;
     const url = this.buildUrl(endpoint, params);
 
     const config: RequestInit = {
       ...customConfig,
       headers: {
-        ...this.getHeaders(),
+        ...this.getHeaders(unitId),
         ...customConfig.headers,
       },
     };
@@ -178,6 +210,16 @@ class ApiClient {
         const errorCode = errorData?.code;
         const errorMsg = String(errorData?.message || errorData?.detail || '').toLowerCase();
 
+        // Fase 2 / E2: la unidad enviada ya no está disponible o falta elegir una. La sesión sigue siendo válida: se
+        // avisa al AuthContext (que refresca la lista) y la petición falla SIN reintentarse con otra unidad.
+        if (errorCode === 'UNIT_NOT_AVAILABLE' || errorCode === 'UNIT_SELECTION_REQUIRED') {
+          window.dispatchEvent(new CustomEvent(
+            errorCode === 'UNIT_NOT_AVAILABLE' ? UNIT_UNAVAILABLE_EVENT : UNIT_SELECTION_REQUIRED_EVENT,
+            { detail: { unitId: unitId ?? null } },
+          ));
+          throw new ApiError(errorData?.message || errorData?.detail || 'Unidad no disponible', response.status, errorData);
+        }
+
         // Si el backend rechaza por acceso revocado o sin vivienda asignada
         const isAccessRevoked =
           errorCode === 'ACCESS_REVOKED' ||
@@ -195,7 +237,7 @@ class ApiClient {
           localStorage.removeItem('havita_refresh_token');
           localStorage.removeItem('havita_tenant');
           localStorage.removeItem('havita_user');
-          localStorage.removeItem('havita_active_property');
+          activeUnitStore.clear();
 
           window.dispatchEvent(new CustomEvent('auth:access_revoked'));
           return {} as T;
@@ -218,7 +260,7 @@ class ApiClient {
           localStorage.removeItem('havita_refresh_token');
           localStorage.removeItem('havita_tenant');
           localStorage.removeItem('havita_user');
-          localStorage.removeItem('havita_active_property');
+          activeUnitStore.clear();
 
           window.dispatchEvent(new CustomEvent('auth:session_expired'));
           return {} as T;
@@ -255,33 +297,36 @@ class ApiClient {
     }
   }
 
-  get<T>(endpoint: string, params?: Record<string, string | number | boolean | undefined | null>): Promise<T> {
-    return this.request<T>(endpoint, { method: 'GET', params });
+  get<T>(endpoint: string, params?: Record<string, string | number | boolean | undefined | null>, opts?: UnitRequestOptions): Promise<T> {
+    return this.request<T>(endpoint, { method: 'GET', params, unitId: opts?.unitId });
   }
 
-  post<T>(endpoint: string, body?: unknown): Promise<T> {
+  post<T>(endpoint: string, body?: unknown, opts?: UnitRequestOptions): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'POST',
       body: body instanceof FormData ? body : (body ? JSON.stringify(body) : undefined),
+      unitId: opts?.unitId,
     });
   }
 
-  put<T>(endpoint: string, body?: unknown): Promise<T> {
+  put<T>(endpoint: string, body?: unknown, opts?: UnitRequestOptions): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PUT',
       body: body instanceof FormData ? body : (body ? JSON.stringify(body) : undefined),
+      unitId: opts?.unitId,
     });
   }
 
-  patch<T>(endpoint: string, body?: unknown): Promise<T> {
+  patch<T>(endpoint: string, body?: unknown, opts?: UnitRequestOptions): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PATCH',
       body: body instanceof FormData ? body : (body ? JSON.stringify(body) : undefined),
+      unitId: opts?.unitId,
     });
   }
 
-  delete<T>(endpoint: string): Promise<T> {
-    return this.request<T>(endpoint, { method: 'DELETE' });
+  delete<T>(endpoint: string, opts?: UnitRequestOptions): Promise<T> {
+    return this.request<T>(endpoint, { method: 'DELETE', unitId: opts?.unitId });
   }
 
   async downloadFile(endpoint: string, filename: string): Promise<void> {

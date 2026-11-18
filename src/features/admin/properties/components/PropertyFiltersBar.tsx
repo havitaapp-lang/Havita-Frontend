@@ -1,6 +1,9 @@
 import React from 'react';
 import { LayoutGrid, List, Search, X } from 'lucide-react';
 import { cn } from '../../../../utils/cn';
+import { ALL_STRUCTURES } from '../../structureFilter';
+import { StructureFilterSelect } from '../../StructureFilterSelect';
+import type { StructureOption } from '../../structureFilter';
 
 interface PropertyFiltersBarProps {
   viewMode: 'structure' | 'list';
@@ -11,6 +14,10 @@ interface PropertyFiltersBarProps {
   onStatusFilterChange: (status: string) => void;
   typeFilter: string;
   onTypeFilterChange: (type: string) => void;
+  /** Fase 2 / E4: filtro por estructura (id). Opcional para no romper otros usos. */
+  structureFilter?: string;
+  onStructureFilterChange?: (value: string) => void;
+  structureChoices?: { options: StructureOption[]; hasUnitsWithoutStructure: boolean };
 }
 
 export const PropertyFiltersBar: React.FC<PropertyFiltersBarProps> = ({
@@ -22,6 +29,9 @@ export const PropertyFiltersBar: React.FC<PropertyFiltersBarProps> = ({
   onStatusFilterChange,
   typeFilter,
   onTypeFilterChange,
+  structureFilter,
+  onStructureFilterChange,
+  structureChoices,
 }) => {
   return (
     <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-2 bg-white rounded-2xl border border-slate-200 shadow-2xs">
@@ -90,6 +100,17 @@ export const PropertyFiltersBar: React.FC<PropertyFiltersBarProps> = ({
           <option value="MAINTENANCE">Mantenimiento</option>
           <option value="INACTIVE">Inactivas</option>
         </select>
+
+        {/* Fase 2 / E4: filtro por estructura (visible también en móvil; oculto si no hay estructuras) */}
+        {structureChoices && onStructureFilterChange && (
+          <StructureFilterSelect
+            value={structureFilter ?? ALL_STRUCTURES}
+            onChange={onStructureFilterChange}
+            options={structureChoices.options}
+            hasUnitsWithoutStructure={structureChoices.hasUnitsWithoutStructure}
+            className="px-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 shrink-0 max-w-[45vw] sm:max-w-none"
+          />
+        )}
 
         {/* Type Filter */}
         <select

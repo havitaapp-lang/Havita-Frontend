@@ -14,8 +14,11 @@ export const requestSchema = z.object({
     .min(FIELD_LIMITS.DESCRIPTION_MIN_LENGTH, VALIDATION_MESSAGES.MIN_LENGTH('La descripción del problema', FIELD_LIMITS.DESCRIPTION_MIN_LENGTH))
     .max(FIELD_LIMITS.DESCRIPTION_MAX_LENGTH, VALIDATION_MESSAGES.MAX_LENGTH('La descripción del problema', FIELD_LIMITS.DESCRIPTION_MAX_LENGTH)),
   category: z.enum([
+    'Aseo / Zonas Comunes',
+    'Zonas Comunes',
     'Daño en Zona Común',
     'Ruido / Convivencia',
+    'Convivencia',
     'Petición Administrativa',
     'Mascotas',
     'Plomería',

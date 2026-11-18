@@ -1,16 +1,21 @@
 import SosButton from './components/SosButton';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Package, ShieldCheck, Wrench, QrCode, Calendar, Bell, Megaphone, Info } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useActiveUnit } from '../../hooks/useActiveUnit';
+import { audienceMatchesUnit } from './unit/audience';
 import { ResidentLivePollBanner } from './components/ResidentLivePollBanner';
 import { ResidentLiveAttendanceBanner } from './components/ResidentLiveAttendanceBanner';
 import { OnboardingModal } from './components/OnboardingModal';
 import { useMyPropertyInfo } from '../../hooks/useMyPropertyInfo';
+import { formatDate } from '../../utils/formatters';
 
 export const ResidentDashboard = () => {
-  const { user, completeOnboarding } = useAuth();
+  const { user, completeOnboarding } = useAuth() as any;
+  // Fase 2 / E2: la unidad sale solo de useActiveUnit (sin fallbacks a la primera unidad ni a user.propertyUnit).
+  const { units: userProperties, activeUnit, activeUnitId, activeLabel } = useActiveUnit();
   const { packages, visitors, pqrsList, communications, reservations } = useData();
 
   // Mostrar el modal si el onboarding no está completado
@@ -34,29 +39,88 @@ export const ResidentDashboard = () => {
     if (completed) completeOnboarding();
   };
 
-  const myPropertyId = user?.propertyUnit || (visitors.length > 0 && visitors[0].propertyId) || 'Mi Apartamento';
-  
-  const residentPropertyId = user?.residentPropertyId;
-  
-  const myPackages = packages.filter(p => {
-    if (residentPropertyId) return p.propertyId === residentPropertyId;
-    return !user?.propertyUnit || p.propertyId === myPropertyId || p.propertyId === user?.propertyUnit;
-  }).filter(p => p.status !== 'DELIVERED');
+  const myPropertyId = activeLabel || 'Mi unidad';
+  const myResidentName = user?.name || 'Residente';
 
-  const myVisitors = visitors.filter(v => {
-    if (residentPropertyId) return v.propertyId === residentPropertyId;
-    return !user?.propertyUnit || v.propertyId === myPropertyId || v.propertyId === user?.propertyUnit;
-  });
+  // Solo datos de la unidad activa (por id). Sin unidad activa no se muestra nada de ninguna unidad.
+  const isActiveUnit = (propertyId?: string | null) => !!activeUnitId && propertyId === activeUnitId;
 
-  const myPQRS = pqrsList.filter(p => {
-    if (residentPropertyId) return p.propertyId === residentPropertyId;
-    return !user?.propertyUnit || p.propertyId === myPropertyId || p.propertyId === user?.propertyUnit;
-  });
+  const myPackages = packages.filter(p => isActiveUnit(p.propertyId)).filter(p => p.status !== 'DELIVERED');
+
+  const myVisitors = visitors.filter(v => isActiveUnit(v.propertyId));
+
+  const myPQRS = pqrsList.filter(p => isActiveUnit(p.propertyId));
 
   const myReservations = reservations.filter(r => {
-    if (residentPropertyId) return r.propertyId === residentPropertyId;
-    return !user?.propertyUnit || r.propertyId === myPropertyId || r.propertyId === user?.propertyUnit;
-  }).filter(r => r.status !== 'Cancelada');
+    // 1. Filtrar por creador / usuario autenticado
+    const creatorId = r.createdByUserId || (r as any).creatorUserId || (r as any).createdByUser?.id;
+    if (creatorId && user?.id) {
+      if (creatorId !== user.id) return false;
+    } else {
+      if (r.residentName && myResidentName && r.residentName.trim().toLowerCase() !== myResidentName.trim().toLowerCase()) {
+        return false;
+      }
+    }
+
+    // 2. Filtrar por propiedad asociada
+    // Fase 2 / E2: solo reservas de la unidad activa (antes coincidía casi cualquiera sin user.propertyUnit).
+    if (!isActiveUnit(r.propertyId)) return false;
+
+    // 3. Excluir canceladas y rechazadas (en inglés o español)
+    const s = String(r.status || '').toUpperCase().trim();
+    if (
+      s === 'CANCELLED' || 
+      s === 'CANCELADA' || 
+      s === 'CANCELADO' || 
+      s === 'REJECTED' || 
+      s === 'RECHAZADA' || 
+      s === 'RECHAZADO'
+    ) {
+      return false;
+    }
+
+    // 4. Solo reservas vigentes (a partir de hoy)
+    const today = new Date().toISOString().split('T')[0];
+    if (r.date && r.date < today) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const relationsOf = (p: any): string[] => (p.relations?.length ? p.relations : [p.type]).filter(Boolean).map((t: string) => t.toLowerCase());
+  const isPropietario = Array.isArray(userProperties) && userProperties.some((p: any) => relationsOf(p).some(t => t.includes('propietario')));
+  const isArrendatario = Array.isArray(userProperties) && userProperties.some((p: any) => relationsOf(p).some(t => t.includes('arrendatario') || t.includes('inquilino')));
+
+  const latestCommunications = useMemo(() => {
+    const published = communications.filter((c) => {
+      // 1. Solo comunicados en estado publicado
+      if (c.status !== 'PUBLISHED') return false;
+
+      // 2. Filtrado por audiencia para este residente
+      const aud = c.audience || 'Todos';
+      if (aud === 'Todos' || aud === 'General') return true;
+      if (aud === 'Propietarios' && isPropietario) return true;
+      if (aud === 'Arrendatarios' && isArrendatario) return true;
+      if (aud === 'Propietarios' && !isPropietario) return false;
+      if (aud === 'Arrendatarios' && !isArrendatario) return false;
+
+      // Filtro visual por torre / unidad: comparación exacta (Fase 2 / E3; antes "Torre 1" alcanzaba a "Torre 10").
+      return audienceMatchesUnit(aud, activeUnit);
+    });
+
+    const parseTime = (dateStr?: string) => {
+      if (!dateStr) return 0;
+      if (dateStr.toLowerCase() === 'hoy') return Date.now();
+      const t = new Date(dateStr).getTime();
+      return isNaN(t) ? 0 : t;
+    };
+
+    // Ordenar de más reciente a más antiguo y tomar los 2 últimos
+    return [...published]
+      .sort((a, b) => parseTime(b.createdAt) - parseTime(a.createdAt))
+      .slice(0, 2);
+  }, [communications, isPropietario, isArrendatario, activeUnit]);
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -134,9 +198,7 @@ export const ResidentDashboard = () => {
             <div className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-40 transition-opacity duration-300 blur-md" style={{ background: 'var(--tenant-primary)' }} />
             <QrCode className="relative z-10 w-full h-full text-white" />
           </div>
-          <div className="flex items-center gap-0.5 mt-2 text-[10px] text-slate-300 font-semibold group-hover:text-white transition-colors whitespace-nowrap">
-            Mostrar código QR <span className="ml-0.5 text-[9px]">&gt;</span>
-          </div>
+
         </div>
       </div>
 
@@ -273,26 +335,33 @@ export const ResidentDashboard = () => {
         </div>
 
         <div className="space-y-3">
-          {communications.slice(0, 2).map((comm, index) => (
-            <Link to="/resident/community" key={comm.id} className="p-4 bg-white rounded-3xl border border-slate-100 shadow-sm flex items-start gap-4 hover:shadow-md transition-shadow group relative">
-              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${index === 0 ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
-                {index === 0 ? <Megaphone className="w-6 h-6" /> : <Info className="w-6 h-6" />}
-              </div>
-              <div className="flex-1 min-w-0 pr-8">
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs font-bold ${index === 0 ? 'text-purple-600' : 'text-blue-600'}`}>{comm.category || 'General'}</span>
-                  <span className="text-xs text-slate-400 absolute right-4 top-4">{comm.createdAt}</span>
+          {latestCommunications.length === 0 ? (
+            <div className="p-6 text-center bg-white rounded-3xl border border-slate-100 shadow-sm text-slate-400">
+              <Megaphone className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+              <p className="text-xs font-medium">No hay comunicados publicados recientemente.</p>
+            </div>
+          ) : (
+            latestCommunications.map((comm, index) => (
+              <Link to="/resident/community" key={comm.id} className="p-4 bg-white rounded-3xl border border-slate-100 shadow-sm flex items-start gap-4 hover:shadow-md transition-shadow group relative overflow-hidden">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${index === 0 ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
+                  {index === 0 ? <Megaphone className="w-6 h-6" /> : <Info className="w-6 h-6" />}
                 </div>
-                <h4 className="text-sm font-bold text-slate-900 leading-snug mt-0.5">{comm.title}</h4>
-                <p className="text-xs text-slate-500 line-clamp-2 mt-0.5">{comm.content}</p>
-              </div>
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-[var(--tenant-primary)] transition-colors">&gt;</span>
-            </Link>
-          ))}
+                <div className="flex-1 min-w-0 pr-6">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-xs font-bold truncate ${index === 0 ? 'text-purple-600' : 'text-blue-600'}`}>{comm.category || 'General'}</span>
+                    <span className="text-xs text-slate-400 shrink-0">{formatDate(comm.createdAt)}</span>
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-900 leading-snug mt-0.5 truncate" title={comm.title}>{comm.title}</h4>
+                  <p className="text-xs text-slate-500 line-clamp-2 mt-0.5 break-all" title={comm.content}>{comm.content}</p>
+                </div>
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-[var(--tenant-primary)] transition-colors">&gt;</span>
+              </Link>
+            ))
+          )}
         </div>
       </div>
 
-      <SosButton />
+      <SosButton className="hidden md:flex" />
     </div>
   );
 };

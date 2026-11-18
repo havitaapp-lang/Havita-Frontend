@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Search, XCircle, UserCheck, KeySquare, FileText, UserSquare2 } from 'lucide-react';
 import { assemblyService } from '../services/assemblyService';
@@ -120,6 +120,14 @@ export const AssemblyAttendanceList = ({ assembly }: AssemblyAttendanceListProps
                               Por apoderado: {attendee.representativeName}
                             </span>
                           )}
+                          {/* Cierre E5 / D14: quién representa a la unidad; las asistencias anteriores sin persona no votan. */}
+                          {attendee.residentName ? (
+                            <span className="text-[10px] text-slate-500 mt-1">Representante: {attendee.residentName}</span>
+                          ) : (
+                            <span data-testid="attendance-no-representative" className="text-[10px] font-bold text-amber-700 mt-1">
+                              Sin representante identificado (no puede votar)
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 text-slate-500 font-bold text-[11px] uppercase tracking-wider">
@@ -134,6 +142,14 @@ export const AssemblyAttendanceList = ({ assembly }: AssemblyAttendanceListProps
                           className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
                         >
                           Registrar
+                        </button>
+                      )}
+                      {isPresent && !attendee.residentName && !attendee.isPowerOfAttorney && assembly.status !== 'ENDED' && (
+                        <button
+                          onClick={() => handleOpenModal({ ...property, attendeeId: attendee.id })}
+                          className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
+                        >
+                          Asignar representante
                         </button>
                       )}
                     </td>
@@ -162,6 +178,7 @@ export const AssemblyAttendanceList = ({ assembly }: AssemblyAttendanceListProps
             setIsModalOpen(false);
             setSelectedProperty(null);
           }}
+          attendeeId={selectedProperty.attendeeId}
         />
       )}
     </div>
@@ -169,25 +186,44 @@ export const AssemblyAttendanceList = ({ assembly }: AssemblyAttendanceListProps
 };
 
 // --- Modal Component ---
-const ManualRegistrationModal = ({ assemblyId, property, onClose, onSuccess }: any) => {
+export const ManualRegistrationModal = ({ assemblyId, property, onClose, onSuccess, attendeeId }: any) => {
   const [mode, setMode] = useState<'TITULAR' | 'APODERADO'>('TITULAR');
-  const [repName, setRepName] = useState('');
   const [loading, setLoading] = useState(false);
+  // Cierre E5 (D13): un solo envío a la vez; el éxito y el refresco del quórum solo tras la respuesta del backend.
+  const submittingRef = useRef(false);
+  // Cierre E5 / D14: la persona que representa a la unidad se elige explícitamente (sin preselección) entre las que el
+  // backend considera elegibles. `attendeeId` = regularizar una asistencia anterior sin persona.
+  const [representativeId, setRepresentativeId] = useState('');
+  const { data: candidates, isLoading: loadingCandidates, isError: candidatesError } = useQuery({
+    queryKey: ['eligibleRepresentatives', assemblyId, property.propertyId],
+    queryFn: () => assemblyService.getEligibleRepresentatives(assemblyId, property.propertyId),
+    retry: false,
+  });
+  const canSubmit = mode === 'TITULAR' && !!representativeId && !loading;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current || !canSubmit) return;
+    submittingRef.current = true;
     try {
       setLoading(true);
-      await assemblyService.registerAttendee(assemblyId, {
-        propertyId: property.propertyId,
-        isPowerOfAttorney: mode === 'APODERADO',
-        representativeName: mode === 'APODERADO' ? repName : undefined
-      });
-      notificationService.showToast('Asistencia registrada correctamente', 'success');
+      if (attendeeId) {
+        await assemblyService.assignRepresentative(assemblyId, attendeeId, representativeId);
+      } else {
+        await assemblyService.registerAttendee(assemblyId, {
+          propertyId: property.propertyId,
+          residentId: representativeId,
+          isPowerOfAttorney: false,
+        });
+      }
+      notificationService.showToast(attendeeId ? 'Representante asignado correctamente' : 'Asistencia registrada correctamente', 'success');
       onSuccess();
     } catch (err: any) {
-      notificationService.showToast(err.response?.data?.message || 'Error al registrar', 'error');
+      // Cierre E5 (D13): el motivo real del backend (p. ej. ASSEMBLY_ENDED, PROPERTY_ALREADY_REGISTERED); antes se leía
+      // err.response, que el cliente de la API no rellena, y se ocultaba con «Error al registrar».
+      notificationService.showToast(err?.message || 'Error al registrar', 'error');
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   };
@@ -230,25 +266,50 @@ const ManualRegistrationModal = ({ assemblyId, property, onClose, onSuccess }: a
           </div>
 
           {mode === 'APODERADO' && (
-            <div className="space-y-2 animate-fade-in">
-              <label className="text-xs font-bold text-slate-700">Nombre del Apoderado</label>
-              <input
-                type="text"
-                required
-                value={repName}
-                onChange={(e) => setRepName(e.target.value)}
-                placeholder="Ej. Juan Pérez"
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-              />
+            <div data-testid="power-of-attorney-unavailable" className="p-4 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 font-medium animate-fade-in">
+              El registro por apoderado no está disponible: Havita aún no gestiona poderes con una autorización verificable
+              (quién otorga el poder y a quién). Registra al titular presente o consulta con soporte.
             </div>
           )}
-          
+
           {mode === 'TITULAR' && (
-            <div className="p-4 bg-blue-50 rounded-xl border border-blue-100 flex gap-3">
-              <KeySquare className="w-5 h-5 text-blue-600 shrink-0" />
-              <p className="text-xs text-blue-800 font-medium">
-                Al registrarlo como titular, confirmas que el propietario o el residente delegado se encuentra presente en la asamblea físicamente.
-              </p>
+            <div className="space-y-3">
+              <div className="p-4 bg-blue-50 rounded-xl border border-blue-100 flex gap-3">
+                <KeySquare className="w-5 h-5 text-blue-600 shrink-0" />
+                <p className="text-xs text-blue-800 font-medium">
+                  Elige quién representa a la unidad en esta asamblea. Solo esa persona podrá votar por la unidad en todas sus preguntas.
+                </p>
+              </div>
+              <fieldset className="space-y-1.5" aria-label="Representante de la unidad">
+                <legend className="text-xs font-bold text-slate-700 mb-1">Representante</legend>
+                {loadingCandidates && <p className="text-xs text-slate-500">Cargando personas de la unidad…</p>}
+                {candidatesError && <p className="text-xs text-red-600">No se pudo consultar quién puede representar a la unidad.</p>}
+                {candidates && candidates.length === 0 && (
+                  <p data-testid="no-eligible-representatives" className="text-xs text-slate-500">
+                    Esta unidad no tiene propietarios ni arrendatarios con cuenta que puedan representarla.
+                  </p>
+                )}
+                {candidates?.map((c) => (
+                  <label
+                    key={c.residentId}
+                    data-testid="representative-option"
+                    className={`flex items-start gap-2 p-2.5 rounded-xl border text-xs ${c.eligible ? 'border-slate-200 cursor-pointer' : 'border-slate-100 text-slate-400'}`}
+                  >
+                    <input
+                      type="radio"
+                      name="representative"
+                      value={c.residentId}
+                      disabled={!c.eligible}
+                      checked={representativeId === c.residentId}
+                      onChange={() => setRepresentativeId(c.residentId)}
+                    />
+                    <span>
+                      <span className="font-bold">{c.name}</span> · {c.type}
+                      {!c.eligible && c.reasonMessage && <span className="block">{c.reasonMessage}</span>}
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
             </div>
           )}
 
@@ -256,9 +317,9 @@ const ManualRegistrationModal = ({ assemblyId, property, onClose, onSuccess }: a
             <button type="button" onClick={onClose} className="px-5 py-2.5 bg-slate-100 text-slate-700 hover:bg-slate-200 font-bold rounded-xl text-sm transition-colors">
               Cancelar
             </button>
-            <button type="submit" disabled={loading} className="px-5 py-2.5 bg-blue-600 text-white hover:bg-blue-700 font-bold rounded-xl text-sm transition-colors flex items-center gap-2">
+            <button type="submit" disabled={!canSubmit} className="px-5 py-2.5 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 font-bold rounded-xl text-sm transition-colors flex items-center gap-2">
               <UserCheck className="w-4 h-4" />
-              {loading ? 'Guardando...' : 'Registrar Asistencia'}
+              {loading ? 'Guardando...' : attendeeId ? 'Asignar Representante' : 'Registrar Asistencia'}
             </button>
           </div>
         </form>

@@ -12,6 +12,7 @@ import { PropertyStatsBar } from './properties/components/PropertyStatsBar';
 import { PropertyFiltersBar } from './properties/components/PropertyFiltersBar';
 import { StructureGrid } from './properties/components/StructureGrid';
 import { StructureDetailView } from './properties/components/StructureDetailView';
+import { ALL_STRUCTURES, matchesStructure, structureOptions } from './structureFilter';
 import { PropertyListView } from './properties/components/PropertyListView';
 import { PropertyDrawer } from './properties/components/PropertyDrawer';
 import { PropertyFormModal } from './properties/components/PropertyFormModal';
@@ -43,6 +44,8 @@ export const PropertiesPage = () => {
   // Search and Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('Todos');
+  // Fase 2 / E4 (D7): estructura por id ('ALL' = todas, 'NONE' = sin estructura).
+  const [structureFilter, setStructureFilter] = useState<string>(ALL_STRUCTURES);
   const [typeFilter, setTypeFilter] = useState('Todos');
 
   // Modal Create / Edit
@@ -67,10 +70,13 @@ export const PropertiesPage = () => {
 
       const matchesStatus = statusFilter === 'Todos' || p.status === statusFilter;
       const matchesType = typeFilter === 'Todos' || p.type === typeFilter;
+      const matchesStruct = matchesStructure(p, structureFilter);
 
-      return matchesSearch && matchesStatus && matchesType;
+      return matchesSearch && matchesStatus && matchesType && matchesStruct;
     });
-  }, [tenantProperties, searchTerm, statusFilter, typeFilter]);
+  }, [tenantProperties, searchTerm, statusFilter, typeFilter, structureFilter]);
+
+  const structureChoices = useMemo(() => structureOptions(tenantProperties), [tenantProperties]);
 
   // Overall Community Statistics
   const communityStats = useMemo(() => {
@@ -196,7 +202,7 @@ export const PropertiesPage = () => {
             className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-colors shadow-xs cursor-pointer inline-flex items-center gap-1.5"
           >
             <UserPlus className="w-4 h-4" />
-            <span className="hidden sm:inline">Generar Enlace Mltiple</span>
+            <span className="hidden sm:inline">Generar Enlace Multiple</span>
           </button>
           <button
             type="button"
@@ -250,6 +256,12 @@ export const PropertiesPage = () => {
         onStatusFilterChange={setStatusFilter}
         typeFilter={typeFilter}
         onTypeFilterChange={setTypeFilter}
+        structureFilter={structureFilter}
+        onStructureFilterChange={(value) => {
+          setStructureFilter(value);
+          setSelectedStructureName(null); // volver al resumen de la estructura elegida (o de todas)
+        }}
+        structureChoices={structureChoices}
       />
 
       {/* Quick Search Match Callout if user searched exact */}

@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, X, Calendar, Clock, ShieldCheck, UserCheck, Repeat } from 'lucide-react';
-import { shiftService } from '../services/shiftService';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Plus, X, Calendar, Clock, ShieldCheck, UserCheck, Repeat, AlertCircle, Sparkles } from 'lucide-react';
+import { shiftService, getTodayDateStr } from '../services/shiftService';
 import type { ShiftType, PersonalMember, GateAssignment } from '../types/personal.types';
 import { notificationService } from '../../../services/notificationService';
 import { CharacterCounter } from '../../../components/ui/CharacterCounter';
 import { FIELD_LIMITS } from '../../../validation/rules/limits';
+import { useTenant } from '../../../contexts/TenantContext';
 
 interface CreateShiftModalProps {
   isOpen: boolean;
@@ -14,6 +15,41 @@ interface CreateShiftModalProps {
   initialTime?: string;
 }
 
+interface ShiftDuration {
+  hours: number;
+  minutes: number;
+  isNextDay: boolean;
+  totalMinutes: number;
+}
+
+const calculateShiftDuration = (start: string, end: string): ShiftDuration => {
+  if (!start || !end) return { hours: 0, minutes: 0, isNextDay: false, totalMinutes: 0 };
+  const [startH, startM] = start.split(':').map(Number);
+  const [endH, endM] = end.split(':').map(Number);
+  const startTotal = (startH || 0) * 60 + (startM || 0);
+  let endTotal = (endH || 0) * 60 + (endM || 0);
+
+  let isNextDay = false;
+  if (endTotal < startTotal) {
+    endTotal += 24 * 60;
+    isNextDay = true;
+  }
+
+  const diffMinutes = endTotal - startTotal;
+  const hours = Math.floor(diffMinutes / 60);
+  const minutes = diffMinutes % 60;
+
+  return { hours, minutes, isNextDay, totalMinutes: diffMinutes };
+};
+
+const PRESET_RANGES = [
+  { label: '06:00 — 18:00 (12h Día)', start: '06:00', end: '18:00' },
+  { label: '18:00 — 06:00 (12h Noche)', start: '18:00', end: '06:00' },
+  { label: '06:00 — 14:00 (8h Mañana)', start: '06:00', end: '14:00' },
+  { label: '14:00 — 22:00 (8h Tarde)', start: '14:00', end: '22:00' },
+  { label: '22:00 — 06:00 (8h Noche)', start: '22:00', end: '06:00' },
+];
+
 export const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
   isOpen,
   onClose,
@@ -21,9 +57,11 @@ export const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
   initialGate,
   initialTime,
 }) => {
-  const [date, setDate] = useState('2026-09-14');
+  const { currentTenant } = useTenant();
+  const todayStr = useMemo(() => getTodayDateStr(), []);
+  const [date, setDate] = useState(todayStr);
   const [startTime, setStartTime] = useState(initialTime || '06:00');
-  const [endTime, setEndTime] = useState('18:00');
+  const [endTime, setEndTime] = useState(initialTime === '18:00' ? '06:00' : '18:00');
   const [gate, setGate] = useState<GateAssignment>((initialGate as GateAssignment) || 'Portería principal');
   const [shiftType, setShiftType] = useState<ShiftType>('Normal');
   const [selectedGuardId, setSelectedGuardId] = useState('');
@@ -44,6 +82,20 @@ export const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
   const [eligibleGuards, setEligibleGuards] = useState<PersonalMember[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Synchronize on modal opening
+  useEffect(() => {
+    if (isOpen) {
+      setDate(getTodayDateStr());
+      if (initialTime) {
+        setStartTime(initialTime);
+        setEndTime(initialTime === '18:00' ? '06:00' : '18:00');
+      }
+      if (initialGate) {
+        setGate(initialGate as GateAssignment);
+      }
+    }
+  }, [isOpen, initialTime, initialGate]);
+
   useEffect(() => {
     shiftService.getEligibleGuards().then((guards) => {
       setEligibleGuards(guards);
@@ -53,6 +105,13 @@ export const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
     });
   }, [selectedGuardId]);
 
+  // Validations
+  const isDateBeforeToday = Boolean(date && date < todayStr);
+  const duration = useMemo(() => calculateShiftDuration(startTime, endTime), [startTime, endTime]);
+  const isTimeSame = duration.totalMinutes === 0;
+  const isDurationTooShort = duration.totalMinutes > 0 && duration.totalMinutes < 30;
+  const isTimeInvalid = isTimeSame || isDurationTooShort;
+
   if (!isOpen) return null;
 
   const toggleDay = (day: string) => {
@@ -61,8 +120,45 @@ export const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
     );
   };
 
+  const applyPreset = (presetStart: string, presetEnd: string) => {
+    setStartTime(presetStart);
+    setEndTime(presetEnd);
+  };
+
+  const getShiftPeriodName = (time: string) => {
+    const [h] = time.split(':').map(Number);
+    if (h >= 5 && h < 12) return 'Mañana';
+    if (h >= 12 && h < 18) return 'Tarde';
+    return 'Noche';
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isDateBeforeToday) {
+      notificationService.showError(
+        'Fecha no válida',
+        `La fecha inicial no puede ser anterior al día de hoy (${todayStr}).`
+      );
+      return;
+    }
+
+    if (isTimeSame) {
+      notificationService.showError(
+        'Horario no válido',
+        'La hora de finalización debe ser diferente a la hora de inicio.'
+      );
+      return;
+    }
+
+    if (isDurationTooShort) {
+      notificationService.showError(
+        'Duración insuficiente',
+        'El turno debe tener una duración mínima de al menos 30 minutos.'
+      );
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -72,15 +168,17 @@ export const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
         : 'Sin asignar';
       const guardPosition = chosenGuard ? chosenGuard.position : 'Guarda de seguridad';
 
+      const dynamicShiftName = `Turno ${getShiftPeriodName(startTime)} (${startTime} — ${endTime}) · ${gate}`;
+
       if (isRecurrent && selectedDays.length > 0) {
         await shiftService.createRecurrentShifts(
           {
-            tenantId: 'tenant-limonar',
+            tenantId: currentTenant?.id || '',
             memberId: selectedGuardId,
             memberName: guardName,
             memberPosition: guardPosition,
             area: 'Seguridad',
-            shiftName: `Turno ${startTime === '06:00' ? 'Día' : 'Noche'} — ${gate}`,
+            shiftName: dynamicShiftName,
             startTime,
             endTime,
             gate,
@@ -99,13 +197,13 @@ export const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
         );
       } else {
         await shiftService.createShift({
-          tenantId: 'tenant-limonar',
+          tenantId: currentTenant?.id || '',
           date,
           memberId: selectedGuardId,
           memberName: guardName,
           memberPosition: guardPosition,
           area: 'Seguridad',
-          shiftName: `Turno ${startTime === '06:00' ? 'Día' : 'Noche'} — ${gate}`,
+          shiftName: dynamicShiftName,
           startTime,
           endTime,
           gate,
@@ -155,57 +253,125 @@ export const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
         <form onSubmit={handleSubmit} className="p-5 overflow-y-auto space-y-4">
           {/* Fecha */}
           <div>
-            <label htmlFor="shift-date" className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-blue-600" />
-              Fecha inicial <span className="text-rose-500">*</span>
+            <label htmlFor="shift-date" className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                Fecha inicial <span className="text-rose-500">*</span>
+              </span>
+              <span className="text-[10px] text-slate-400 font-medium">
+                A partir de hoy ({todayStr})
+              </span>
             </label>
             <input
               id="shift-date"
               type="date"
               required
+              min={todayStr}
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500/20"
+              className={`w-full px-3.5 py-2.5 text-xs rounded-xl border outline-none transition-all ${
+                isDateBeforeToday
+                  ? 'border-rose-400 bg-rose-50/40 text-rose-800 focus:ring-2 focus:ring-rose-500/20'
+                  : 'border-slate-200 bg-white focus:ring-2 focus:ring-blue-500/20'
+              }`}
             />
+            {isDateBeforeToday && (
+              <p className="text-[11px] text-rose-500 font-semibold mt-1 flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                La fecha inicial no puede ser anterior al día actual ({todayStr}).
+              </p>
+            )}
           </div>
 
-          {/* Horario (Inicio y Fin) */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label htmlFor="shift-start" className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-amber-600" />
-                Hora Inicio
-              </label>
-              <select
-                id="shift-start"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-blue-500/20 font-mono font-bold"
-              >
-                <option value="06:00">06:00 AM</option>
-                <option value="07:00">07:00 AM</option>
-                <option value="14:00">02:00 PM (14:00)</option>
-                <option value="18:00">06:00 PM (18:00)</option>
-                <option value="22:00">10:00 PM (22:00)</option>
-              </select>
+          {/* Horario (Inicio y Fin) - Totalmente Configurable */}
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="shift-start" className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-amber-600" />
+                  Hora Inicio
+                </label>
+                <input
+                  id="shift-start"
+                  type="time"
+                  required
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  className={`w-full px-3 py-2.5 text-xs rounded-xl border bg-white outline-none font-mono font-bold transition-all ${
+                    isTimeInvalid
+                      ? 'border-rose-300 focus:ring-2 focus:ring-rose-500/20'
+                      : 'border-slate-200 focus:ring-2 focus:ring-blue-500/20'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="shift-end" className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-amber-600" />
+                  Hora Fin
+                </label>
+                <input
+                  id="shift-end"
+                  type="time"
+                  required
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  className={`w-full px-3 py-2.5 text-xs rounded-xl border bg-white outline-none font-mono font-bold transition-all ${
+                    isTimeInvalid
+                      ? 'border-rose-300 focus:ring-2 focus:ring-rose-500/20'
+                      : 'border-slate-200 focus:ring-2 focus:ring-blue-500/20'
+                  }`}
+                />
+              </div>
             </div>
 
-            <div>
-              <label htmlFor="shift-end" className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-amber-600" />
-                Hora Fin
-              </label>
-              <select
-                id="shift-end"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white outline-none focus:ring-2 focus:ring-blue-500/20 font-mono font-bold"
-              >
-                <option value="14:00">02:00 PM (14:00)</option>
-                <option value="18:00">06:00 PM (18:00)</option>
-                <option value="22:00">10:00 PM (22:00)</option>
-                <option value="06:00">06:00 AM (Día sig.)</option>
-              </select>
+            {/* Atajos Rápidos de Rango */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+              <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1 mr-1">
+                <Sparkles className="w-3 h-3 text-amber-500" /> Atajos:
+              </span>
+              {PRESET_RANGES.map((preset) => {
+                const isActive = startTime === preset.start && endTime === preset.end;
+                return (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => applyPreset(preset.start, preset.end)}
+                    className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-2xs font-bold'
+                        : 'bg-slate-100 hover:bg-slate-200/80 text-slate-700'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Duración y Feedback del Horario */}
+            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-600">Duración:</span>
+                <span className="text-[11px] font-black font-mono text-blue-700">
+                  {duration.hours}h {duration.minutes > 0 ? `${duration.minutes}m` : ''}
+                </span>
+                {duration.isNextDay && (
+                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200/60">
+                    🌙 Cruza al día siguiente
+                  </span>
+                )}
+              </div>
+              {isTimeSame && (
+                <span className="text-[11px] text-rose-500 font-bold flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3 shrink-0" /> Horas idénticas
+                </span>
+              )}
+              {isDurationTooShort && (
+                <span className="text-[11px] text-rose-500 font-bold flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3 shrink-0" /> Mínimo 30 min
+                </span>
+              )}
             </div>
           </div>
 
@@ -362,8 +528,12 @@ export const CreateShiftModal: React.FC<CreateShiftModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="flex-1 py-2.5 rounded-xl bg-[var(--tenant-primary)] hover:bg-blue-600 text-white font-black text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+              disabled={isSubmitting || isDateBeforeToday || isTimeInvalid}
+              className={`flex-1 py-2.5 rounded-xl font-black text-xs shadow-md transition-all flex items-center justify-center gap-2 ${
+                isSubmitting || isDateBeforeToday || isTimeInvalid
+                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                  : 'bg-[var(--tenant-primary)] hover:bg-blue-600 text-white cursor-pointer'
+              }`}
             >
               {isSubmitting ? 'Guardando...' : 'Crear Turno'}
             </button>

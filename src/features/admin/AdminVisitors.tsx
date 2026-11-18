@@ -13,6 +13,7 @@ import { CharacterCounter } from '../../components/ui/CharacterCounter';
 import { SubmitButton } from '../../components/ui/SubmitButton';
 import { notificationService } from '../../services/notificationService';
 import { VisitorScheduleSettings } from './components/VisitorScheduleSettings';
+import { VisitorStaffTrail } from '../../components/visitors/VisitorStaffTrail';
 import { maskDocument, normalizeWhitespace } from '../../utils/sanitizers';
 import { FIELD_LIMITS } from '../../validation/rules/limits';
 
@@ -284,6 +285,7 @@ export const AdminVisitors = () => {
               <option value="APPROVED">Autorizado</option>
               <option value="ENTERED">Adentro</option>
               <option value="EXITED">Salió</option>
+              <option value="CANCELLED">Cancelado</option>
             </select>
           </div>
         </div>
@@ -313,14 +315,16 @@ export const AdminVisitors = () => {
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
                     vis.status === 'ENTERED' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
                     vis.status === 'APPROVED' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
-                    vis.status === 'EXITED' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                    vis.status === 'EXITED' ? 'bg-slate-50 text-slate-500 border border-slate-200' :
+                    vis.status === 'CANCELLED' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
                     vis.status === 'EXPIRED' ? 'bg-slate-50 text-slate-500 border border-slate-200' :
                     'bg-slate-100 text-slate-600'
                   }`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${
                       vis.status === 'ENTERED' ? 'bg-emerald-500' :
                       vis.status === 'APPROVED' ? 'bg-blue-500' : 
-                      vis.status === 'EXITED' ? 'bg-rose-500' :
+                      vis.status === 'EXITED' ? 'bg-slate-400' :
+                      vis.status === 'CANCELLED' ? 'bg-rose-500' :
                       vis.status === 'EXPIRED' ? 'bg-slate-400' :
                       'bg-slate-400'
                     }`} />
@@ -347,6 +351,7 @@ export const AdminVisitors = () => {
                       {vis.status === 'EXITED' && `Salió: ${formatTime(vis.exitedAt)}`}
                       {vis.status === 'APPROVED' && `Esperado: ${formatTime(vis.expectedAt)}`}
                     </span>
+                    <VisitorStaffTrail visitor={vis} className="mt-1" />
                   </div>
                 </div>
 
@@ -439,14 +444,16 @@ export const AdminVisitors = () => {
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
                         vis.status === 'ENTERED' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
                         vis.status === 'APPROVED' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
-                        vis.status === 'EXITED' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                        vis.status === 'EXITED' ? 'bg-slate-50 text-slate-500 border border-slate-200' :
+                        vis.status === 'CANCELLED' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
                         vis.status === 'EXPIRED' ? 'bg-slate-50 text-slate-500 border border-slate-200' :
                         'bg-slate-100 text-slate-600'
                       }`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${
                           vis.status === 'ENTERED' ? 'bg-emerald-500' :
                           vis.status === 'APPROVED' ? 'bg-blue-500' : 
-                          vis.status === 'EXITED' ? 'bg-rose-500' :
+                          vis.status === 'EXITED' ? 'bg-slate-400' :
+                          vis.status === 'CANCELLED' ? 'bg-rose-500' :
                           vis.status === 'EXPIRED' ? 'bg-slate-400' :
                           'bg-slate-400'
                         }`} />
@@ -457,6 +464,7 @@ export const AdminVisitors = () => {
                       {vis.status === 'ENTERED' && <div>Entró: {formatTime(vis.enteredAt)}</div>}
                       {vis.status === 'EXITED' && <div>Salió: {formatTime(vis.exitedAt)}</div>}
                       {vis.status === 'APPROVED' && <div>Esperado: {formatTime(vis.expectedAt)}</div>}
+                      <VisitorStaffTrail visitor={vis} className="mt-1" />
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">

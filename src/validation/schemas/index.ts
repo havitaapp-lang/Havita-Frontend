@@ -7,3 +7,4 @@ export * from './communicationSchema';
 export * from './propertySchema';
 export * from './documentSchema';
 export * from './loginSchema';
+export * from './profileSchema';

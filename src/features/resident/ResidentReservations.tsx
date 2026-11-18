@@ -1,10 +1,11 @@
-﻿import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Calendar, Plus, Clock, X, Trash2, Users, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useData } from '../../contexts/DataContext';
 import { useTenant } from '../../contexts/TenantContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useActiveUnit } from '../../hooks/useActiveUnit';
 import type { Reservation } from '../../types';
 import { reservationSchema } from '../../validation/schemas/reservationSchema';
 import { validateForm } from '../../validation/validators/formValidator';
@@ -13,30 +14,129 @@ import { FormErrorSummary } from '../../components/ui/FormErrorSummary';
 import { SubmitButton } from '../../components/ui/SubmitButton';
 import { notificationService } from '../../services/notificationService';
 import { normalizeWhitespace } from '../../utils/sanitizers';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../../api/apiClient';
 import { FIELD_LIMITS } from '../../validation/rules/limits';
 
+interface PaginationControlsProps {
+  currentPage: number;
+  totalPages: number;
+  totalItems: number;
+  itemsPerPage: number;
+  onPageChange: (page: number) => void;
+  itemName: string;
+}
+
+const PaginationControls: React.FC<PaginationControlsProps> = ({
+  currentPage,
+  totalPages,
+  totalItems,
+  itemsPerPage,
+  onPageChange,
+  itemName,
+}) => {
+  if (totalItems === 0) return null;
+
+  const startIdx = (currentPage - 1) * itemsPerPage + 1;
+  const endIdx = Math.min(currentPage * itemsPerPage, totalItems);
+
+  const pages: number[] = [];
+  for (let i = 1; i <= totalPages; i++) {
+    pages.push(i);
+  }
+
+  return (
+    <div className="pt-3 mt-1 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+      <div>
+        Mostrando <span className="font-semibold text-slate-700">{startIdx}</span> a <span className="font-semibold text-slate-700">{endIdx}</span> de <span className="font-semibold text-slate-700">{totalItems}</span> {itemName}
+      </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            disabled={currentPage === 1}
+            onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+            className="px-2.5 py-1.5 rounded-xl border border-slate-200/80 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition-all shadow-2xs font-semibold cursor-pointer"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Anterior</span>
+          </button>
+
+          <div className="flex items-center gap-1">
+            {pages.map((p) => {
+              if (totalPages > 7) {
+                if (p !== 1 && p !== totalPages && Math.abs(p - currentPage) > 1) {
+                  if (p === 2 || p === totalPages - 1) {
+                    return <span key={p} className="px-1 text-slate-400 select-none">...</span>;
+                  }
+                  return null;
+                }
+              }
+
+              const isActive = p === currentPage;
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => onPageChange(p)}
+                  className={`w-7 h-7 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center ${
+                    isActive
+                      ? 'bg-[var(--tenant-primary)] text-white shadow-xs'
+                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80 shadow-2xs'
+                  }`}
+                >
+                  {p}
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            disabled={currentPage >= totalPages}
+            onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+            className="px-2.5 py-1.5 rounded-xl border border-slate-200/80 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition-all shadow-2xs font-semibold cursor-pointer"
+          >
+            <span className="hidden sm:inline">Siguiente</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const ResidentReservations = () => {
-  const { user, activePropertyId, userProperties } = useAuth() as any;
+  const { user } = useAuth() as any;
+  // Fase 2 / E2: única fuente de unidad (sin la cadena de fallbacks que acababa en la primera unidad).
+  const { activeUnitId: activePropertyId, activeLabel } = useActiveUnit();
   const { currentTenant } = useTenant();
   const { reservations, createReservation, deleteReservation, changeReservationStatus, commonZones } = useData();
+  const queryClient = useQueryClient();
 
-  const activeProperty = userProperties?.find((prop: any) => prop.propertyId === activePropertyId);
-  const myPropertyId = activeProperty?.name || activeProperty?.number || activePropertyId || user?.residentPropertyId || user?.propertyUnit || 'Mi Apartamento';
+  const myPropertyUUID = activePropertyId || '';
+  const myPropertyDisplay = activeLabel || 'Mi unidad';
   const myResidentName = user?.name || 'Residente';
   
-  const myReservations = reservations.filter(r => {
-    if (activePropertyId && (r.propertyId === activePropertyId)) return true;
-    if (activeProperty?.number && (r.propertyId === activeProperty.number)) return true;
-    if (activeProperty?.name && (r.propertyId === activeProperty.name)) return true;
-    if (!activePropertyId && user?.residentPropertyId && r.propertyId === user.residentPropertyId) return true;
-    if (!activePropertyId && user?.propertyUnit && (r.propertyId === user.propertyUnit)) return true;
-    if (r.residentName === myResidentName && !activePropertyId) return true;
-    return false;
-  });
-  console.log("ALL RESERVATIONS:", reservations);
-  console.log("MY RESERVATIONS:", myReservations);
+  const currentUserId = user?.id;
+  const myReservations = useMemo(() => {
+    return reservations.filter(r => {
+      // 1. Si la reserva tiene creador explícito, debe pertenecer al usuario actual
+      const creatorId = r.createdByUserId || (r as any).creatorUserId || (r as any).createdByUser?.id;
+      if (creatorId && currentUserId) {
+        if (creatorId !== currentUserId) return false;
+      } else {
+        // Fallback: verificar por nombre del residente si no hay ID de creador
+        if (r.residentName && myResidentName && r.residentName.trim().toLowerCase() !== myResidentName.trim().toLowerCase()) {
+          return false;
+        }
+      }
+
+      // 2. Solo reservas de la unidad activa (por id).
+      return !!activePropertyId && r.propertyId === activePropertyId;
+    });
+  }, [reservations, currentUserId, myResidentName, activePropertyId]);
 
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -72,13 +172,20 @@ export const ResidentReservations = () => {
     enabled: !!selectedZone?.id && !!formData.date && isModalOpen
   });
 
+  const activeOccupiedReservations = useMemo(() => {
+    return dayReservations.filter((r: any) => {
+      const s = String(r.status || '').toUpperCase();
+      return s !== 'CANCELLED' && s !== 'CANCELADA' && s !== 'REJECTED' && s !== 'RECHAZADA';
+    });
+  }, [dayReservations]);
+
   const handleOpenBooking = (zoneName: Reservation['zone']) => {
     setFormData({
       zone: zoneName,
       date: todayStr,
       startTime: '14:00',
       endTime: '18:00',
-      guestsCount: '10',
+      guestsCount: String(Math.min(commonZones.find(z => z.name === zoneName)?.capacity || 10, 2)),
       observations: ''
     });
     setErrors({});
@@ -95,7 +202,7 @@ export const ResidentReservations = () => {
       startTime: formData.startTime,
       endTime: formData.endTime,
       attendees: Number(formData.guestsCount),
-      propertyId: myPropertyId,
+      propertyId: myPropertyUUID,
     };
 
     const validation = validateForm(reservationSchema, normalized);
@@ -146,9 +253,15 @@ export const ResidentReservations = () => {
         setErrorList([{ field: 'startTime', message: errorMsg }]);
         return;
       }
+      if (selectedZone.capacity && normalized.attendees > selectedZone.capacity) {
+        const errorMsg = `La capacidad máxima permitida para ${selectedZone.name} es de ${selectedZone.capacity} asistentes.`;
+        setErrors({ attendees: errorMsg });
+        setErrorList([{ field: 'attendees', message: errorMsg }]);
+        return;
+      }
     }
 
-    const overlaps = dayReservations.some((r: any) => {
+    const overlaps = activeOccupiedReservations.some((r: any) => {
       return formData.startTime < r.endTime && formData.endTime > r.startTime;
     });
 
@@ -174,16 +287,18 @@ export const ResidentReservations = () => {
         endTime: normalized.endTime,
         guestsCount: normalized.attendees,
         observations: formData.observations ? normalizeWhitespace(formData.observations) : undefined,
-        propertyId: myPropertyId,
+        propertyId: myPropertyUUID,
         residentName: myResidentName,
         status: 'PENDING',
         tenantId: currentTenant?.id || 'tenant-limonar'
       });
 
+      await queryClient.invalidateQueries({ queryKey: ['reservations'] });
+
       notificationService.showToast('Reserva solicitada. Pendiente de aprobación.', 'success');
       setIsModalOpen(false);
-    } catch {
-      notificationService.showError('Error al reservar', 'No fue posible completar la reserva.');
+    } catch (err: any) {
+      notificationService.showError('Error al reservar', err?.message || 'No fue posible completar la reserva.');
     } finally {
       setIsSubmitting(false);
     }
@@ -198,14 +313,31 @@ export const ResidentReservations = () => {
     );
 
     if (confirmed) {
-      changeReservationStatus(id, 'Cancelada', 'Cancelada por el residente');
+      await changeReservationStatus(id, 'Cancelada', 'Cancelada por el residente');
+      await queryClient.invalidateQueries({ queryKey: ['reservations'] });
       notificationService.showToast('Reserva cancelada correctamente', 'success');
     }
   };
 
-  const totalPages = Math.ceil(myReservations.length / ITEMS_PER_PAGE) || 1;
+  const sortedReservations = useMemo(() => {
+    return [...myReservations].sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      if (dateB !== dateA) return dateB - dateA;
+      return (b.startTime || '').localeCompare(a.startTime || '');
+    });
+  }, [myReservations]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedReservations.length / ITEMS_PER_PAGE));
   const validCurrentPage = Math.min(currentPage, totalPages);
-  const paginatedReservations = myReservations.slice((validCurrentPage - 1) * ITEMS_PER_PAGE, validCurrentPage * ITEMS_PER_PAGE);
+  const paginatedReservations = useMemo(() => {
+    const start = (validCurrentPage - 1) * ITEMS_PER_PAGE;
+    return sortedReservations.slice(start, start + ITEMS_PER_PAGE);
+  }, [sortedReservations, validCurrentPage]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [totalPages, currentPage]);
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto font-sans pb-10">
@@ -303,12 +435,17 @@ export const ResidentReservations = () => {
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-slate-900 text-sm">{res.zone}</span>
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                    res.status === 'Confirmada' ? 'bg-emerald-100 text-emerald-800' :
-                    res.status === 'PENDING' ? 'bg-amber-100 text-amber-800' :
-                    res.status === 'Rechazada' ? 'bg-rose-100 text-rose-800' :
+                    res.status === 'Confirmada' || res.status === 'CONFIRMED' ? 'bg-emerald-100 text-emerald-800' :
+                    res.status === 'PENDING' || res.status === 'Pendiente' ? 'bg-amber-100 text-amber-800' :
+                    res.status === 'Rechazada' || res.status === 'REJECTED' ? 'bg-rose-100 text-rose-800' :
+                    res.status === 'Cancelada' || res.status === 'CANCELLED' ? 'bg-slate-100 text-slate-800' :
                     'bg-slate-100 text-slate-800'
                   }`}>
-                    {res.status}
+                    {res.status === 'CONFIRMED' ? 'Confirmada' :
+                     res.status === 'PENDING' ? 'Pendiente' :
+                     res.status === 'REJECTED' ? 'Rechazada' :
+                     res.status === 'CANCELLED' ? 'Cancelada' :
+                     res.status}
                   </span>
                 </div>
                 <div className="text-xs text-slate-500 flex items-center gap-3 mt-1.5">
@@ -331,13 +468,13 @@ export const ResidentReservations = () => {
                     )}
                     {res.adminNotes && (
                       <div className={`text-xs p-2 rounded-lg border ${
-                        res.status === 'Rechazada' ? 'bg-rose-50 text-rose-700 border-rose-100' :
-                        res.status === 'Cancelada' ? 'bg-slate-50 text-slate-600 border-slate-100' :
+                        res.status === 'Rechazada' || res.status === 'REJECTED' ? 'bg-rose-50 text-rose-700 border-rose-100' :
+                        res.status === 'Cancelada' || res.status === 'CANCELLED' ? 'bg-slate-50 text-slate-600 border-slate-100' :
                         'bg-amber-50 text-amber-700 border-amber-100'
                       }`}>
                         <span className="font-semibold block mb-0.5">
-                          {res.status === 'Cancelada' ? 'Cancelada:' : 
-                           res.status === 'Rechazada' ? 'Motivo de rechazo:' : 
+                          {res.status === 'Cancelada' || res.status === 'CANCELLED' ? 'Cancelada:' : 
+                           res.status === 'Rechazada' || res.status === 'REJECTED' ? 'Motivo de rechazo:' : 
                            'Nota del administrador:'}
                         </span>
                         {res.adminNotes}
@@ -367,7 +504,7 @@ export const ResidentReservations = () => {
                 >
                   Repetir
                 </button>
-                {res.status === 'PENDING' && (
+                {(res.status === 'PENDING' || res.status === 'Pendiente') && (
                   <button
                     onClick={() => handleCancelBooking(res.id, res.zone, res.date)}
                     className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
@@ -380,7 +517,7 @@ export const ResidentReservations = () => {
             </Card>
           ))}
 
-          {myReservations.length === 0 && (
+          {sortedReservations.length === 0 && (
             <div className="p-6 text-center bg-white rounded-2xl border border-slate-200 text-slate-400 text-xs">
               <Calendar className="w-8 h-8 mx-auto text-slate-300 mb-2" />
               <p className="font-semibold text-slate-700">No tienes reservas programadas.</p>
@@ -390,31 +527,15 @@ export const ResidentReservations = () => {
         </div>
 
         {/* Paginación */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 bg-white rounded-3xl border border-slate-200/80 shadow-xs mt-4">
-            <span className="text-xs text-slate-500 font-medium">
-              Mostrando {(validCurrentPage - 1) * ITEMS_PER_PAGE + 1} a {Math.min(validCurrentPage * ITEMS_PER_PAGE, myReservations.length)} de {myReservations.length} reservas
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button
-                disabled={validCurrentPage === 1}
-                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50 disabled:hover:bg-transparent cursor-pointer transition-colors"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <span className="text-xs font-bold text-slate-700 min-w-[2rem] text-center">
-                {validCurrentPage} / {totalPages}
-              </span>
-              <button
-                disabled={validCurrentPage === totalPages}
-                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50 disabled:hover:bg-transparent cursor-pointer transition-colors"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
+        {sortedReservations.length > 0 && (
+          <PaginationControls
+            currentPage={validCurrentPage}
+            totalPages={totalPages}
+            totalItems={sortedReservations.length}
+            itemsPerPage={ITEMS_PER_PAGE}
+            onPageChange={setCurrentPage}
+            itemName="reservas"
+          />
         )}
       </div>
 
@@ -449,7 +570,18 @@ export const ResidentReservations = () => {
                   id="res-zone"
                   name="zone"
                   value={formData.zone}
-                  onChange={(e) => setFormData({ ...formData, zone: e.target.value as any })}
+                  onChange={(e) => {
+                    const newZone = e.target.value as any;
+                    const z = commonZones.find(item => item.name === newZone);
+                    const maxCap = z?.capacity ? Number(z.capacity) : FIELD_LIMITS.RESERVATION_MAX_ATTENDEES;
+                    let guests = formData.guestsCount;
+                    if (guests !== '' && Number(guests) > maxCap) {
+                      guests = String(maxCap);
+                    }
+                    setFormData({ ...formData, zone: newZone, guestsCount: guests });
+                    if (errors.zone) setErrors(prev => ({ ...prev, zone: '' }));
+                    if (errors.attendees) setErrors(prev => ({ ...prev, attendees: '' }));
+                  }}
                   className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
                 >
                   <option value="">Seleccione una zona</option>
@@ -496,12 +628,37 @@ export const ResidentReservations = () => {
                       name="guestsCount"
                       type="number"
                       min={FIELD_LIMITS.RESERVATION_MIN_ATTENDEES}
-                      max={FIELD_LIMITS.RESERVATION_MAX_ATTENDEES}
+                      max={selectedZone?.capacity ? Number(selectedZone.capacity) : FIELD_LIMITS.RESERVATION_MAX_ATTENDEES}
                       value={formData.guestsCount}
-                      onChange={(e) => setFormData({ ...formData, guestsCount: e.target.value })}
-                      className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const maxCap = selectedZone?.capacity ? Number(selectedZone.capacity) : FIELD_LIMITS.RESERVATION_MAX_ATTENDEES;
+                        if (val === '') {
+                          setFormData({ ...formData, guestsCount: '' });
+                          return;
+                        }
+                        const num = Number(val);
+                        if (num > maxCap) {
+                          setFormData({ ...formData, guestsCount: String(maxCap) });
+                          setErrors(prev => ({
+                            ...prev,
+                            attendees: `La capacidad máxima permitida para ${selectedZone?.name || 'esta zona'} es de ${maxCap} personas.`
+                          }));
+                          return;
+                        }
+                        setFormData({ ...formData, guestsCount: val });
+                        if (errors.attendees) setErrors(prev => ({ ...prev, attendees: '' }));
+                      }}
+                      className={`w-full pl-9 pr-3 py-2 text-xs sm:text-sm rounded-xl border bg-white text-slate-900 focus:outline-none focus:ring-2 transition-all ${
+                        errors.attendees ? 'border-rose-400 focus:ring-rose-200' : 'border-slate-200 focus:border-[var(--tenant-primary)] focus:ring-blue-100'
+                      }`}
                     />
                   </div>
+                  {selectedZone?.capacity && (
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Capacidad máxima: <span className="font-semibold text-slate-600">{selectedZone.capacity} personas</span>
+                    </p>
+                  )}
                 </FormField>
               </div>
 
@@ -511,9 +668,9 @@ export const ResidentReservations = () => {
                     <span>Disponibilidad el {formData.date}</span>
                     {isLoadingAvailability && <span className="text-slate-400">Cargando...</span>}
                   </div>
-                  {dayReservations.length > 0 ? (
+                  {activeOccupiedReservations.length > 0 ? (
                     <div className="space-y-1.5">
-                      {dayReservations.map((r: any) => (
+                      {activeOccupiedReservations.map((r: any) => (
                         <div key={r.id} className="flex items-center gap-2 text-rose-600 bg-rose-50 px-2 py-1 rounded-md border border-rose-100">
                           <Clock className="w-3.5 h-3.5" />
                           <span className="font-medium">Ocupado:</span> {r.startTime} - {r.endTime}

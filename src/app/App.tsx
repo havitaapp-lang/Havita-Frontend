@@ -12,13 +12,17 @@ import { DataProvider } from '../contexts/DataContext';
 import { PublicLayout } from '../layouts/PublicLayout';
 import { LandingPage } from '../features/public/LandingPage';
 import { LoginPage } from '../features/auth/LoginPage';
+import { AppLaunch } from './AppLaunch';
+import { APP_LAUNCH_PATH } from './appLaunchPaths';
+import { ForgotPasswordPage } from '../features/auth/ForgotPasswordPage';
+import { ResetPasswordPage } from '../features/auth/ResetPasswordPage';
 import { VisitorPassView } from '../features/public/VisitorPassView';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { OfflineBanner } from '../components/OfflineBanner';
 
 // Legal Pages
 import { LegalLayout } from '../features/legal/LegalLayout';
-import { TermsPage, PrivacyPage, SecurityPage } from '../features/legal/LegalPages';
+import { TermsPage, PrivacyPage, SecurityPage, PrivacyNoticePage } from '../features/legal/LegalPages';
 
 // Layouts
 import { AdminLayout } from '../layouts/AdminLayout';
@@ -42,11 +46,17 @@ import { AdminShiftsPage } from '../features/personal/pages/AdminShiftsPage';
 import { AdminAttendancePage } from '../features/personal/pages/AdminAttendancePage';
 import { AssembliesPage } from '../features/assemblies/pages/AssembliesPage';
 import { AssemblyDetailPage } from '../features/assemblies/pages/AssemblyDetailPage';
+import { ResidentProxiesPage } from '../features/assemblies/proxies/pages/ResidentProxiesPage';
+import { isAssemblyProxiesEnabled } from '../features/assemblies/proxies/featureFlags';
 
 // Security Views
 import { SecurityDashboard } from '../features/security/SecurityDashboard';
 import { SecurityVisitors } from '../features/security/SecurityVisitors';
+import { ResidentChatPage } from '../features/chat/ResidentChatPage';
+import { SecurityChatPage } from '../features/chat/SecurityChatPage';
 import { SecurityPackages } from '../features/security/SecurityPackages';
+import { SecurityIntercom } from '../features/security/SecurityIntercom';
+import { SecurityProfilePage } from '../features/security/SecurityProfilePage';
 
 // Resident Views
 import { ResidentDashboard } from '../features/resident/ResidentDashboard';
@@ -61,6 +71,8 @@ import { ResidentMarketplace } from '../features/resident/ResidentMarketplace';
 import { ResidentMyListings } from '../features/resident/ResidentMyListings';
 import { AdminMarketplacePage } from '../features/admin/AdminMarketplacePage';
 import { AdminMarketplaceSettings } from '../features/admin/AdminMarketplaceSettings';
+import { AdminIntercom } from '../features/admin/AdminIntercom';
+import { AdminProfilePage } from '../features/admin/AdminProfilePage';
 
 // Super Admin Layout & Views
 import { SuperAdminLayout } from '../layouts/SuperAdminLayout';
@@ -162,35 +174,55 @@ const AppContent = () => {
           <Route index element={<Navigate to="/legal/terminos" replace />} />
           <Route path="terminos" element={<TermsPage />} />
           <Route path="privacidad" element={<PrivacyPage />} />
+          <Route path="aviso-privacidad" element={<PrivacyNoticePage />} />
           <Route path="seguridad" element={<SecurityPage />} />
         </Route>
               
               {/* Auth & Public Passes */}
               <Route path="/login" element={<LoginPage />} />
+              {/* P8-B: arranque de la PWA instalada (start_url): portal del rol o inicio de sesión */}
+              <Route path={APP_LAUNCH_PATH} element={<AppLaunch />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/demo" element={<Navigate to="/login" replace />} />
               <Route path="/pass/:token" element={<VisitorPassView />} />
               <Route path="/register/invite/:token" element={<ResidentRegistrationPage />} />
               
-              {/* Admin Portal (All 10 Modules with Full CRUD) */}
+              {/* Admin Portal (All Modules with Full CRUD) */}
               <Route path="/admin" element={<AdminLayout />}>
                 <Route index element={<AdminDashboard />} />
                 <Route path="residents" element={<ResidentsPage />} />
                 <Route path="properties" element={<PropertiesPage />} />
-                <Route path="personal" element={<PersonalPage />} />
+                
+                {/* Primary English routes */}
+                <Route path="staff" element={<PersonalPage />} />
+                <Route path="staff/:id" element={<PersonalDetailPage />} />
+                <Route path="shifts" element={<AdminShiftsPage />} />
+                <Route path="attendance" element={<AdminAttendancePage />} />
+                <Route path="assemblies" element={<AssembliesPage />} />
+                <Route path="assemblies/:id" element={<AssemblyDetailPage />} />
+
+                {/* Backwards-compatibility aliases */}
+                <Route path="personal" element={<Navigate to="/admin/staff" replace />} />
                 <Route path="personal/:id" element={<PersonalDetailPage />} />
-                <Route path="turnos" element={<AdminShiftsPage />} />
-                <Route path="asistencia" element={<AdminAttendancePage />} />
-                <Route path="asambleas" element={<AssembliesPage />} />
+                <Route path="turnos" element={<Navigate to="/admin/shifts" replace />} />
+                <Route path="asistencia" element={<Navigate to="/admin/attendance" replace />} />
+                <Route path="asambleas" element={<Navigate to="/admin/assemblies" replace />} />
                 <Route path="asambleas/:id" element={<AssemblyDetailPage />} />
+
                 <Route path="communications" element={<CommunicationsPage />} />
+                <Route path="intercom" element={<AdminIntercom />} />
                 <Route path="packages" element={<AdminPackages />} />
                 <Route path="visitors" element={<AdminVisitors />} />
+                {/* Fase 3: bandeja de chat de portería en solo lectura. */}
+                <Route path="chat" element={<SecurityChatPage readOnly />} />
                 <Route path="requests" element={<AdminRequests />} />
                 <Route path="reservations" element={<AdminReservations />} />
                 <Route path="documents" element={<AdminDocuments />} />
                 <Route path="marketplace" element={<AdminMarketplacePage />} />
                 <Route path="marketplace/settings" element={<AdminMarketplaceSettings />} />
                 <Route path="settings" element={<AdminSettings />} />
+                <Route path="profile" element={<AdminProfilePage />} />
                 <Route path="*" element={<Navigate to="/admin" replace />} />
               </Route>
               
@@ -206,6 +238,10 @@ const AppContent = () => {
                 <Route path="marketplace" element={<ResidentMarketplace />} />
                 <Route path="marketplace/my-listings" element={<ResidentMyListings />} />
                 <Route path="my-home" element={<ResidentMyHome />} />
+                {/* Fase 3: chat de texto con portería. */}
+                <Route path="chat" element={<ResidentChatPage />} />
+                {/* Fase 2 / P6: poderes (solo con VITE_FEATURE_ASSEMBLY_PROXIES=true; el backend decide los permisos). */}
+                {isAssemblyProxiesEnabled() && <Route path="proxies" element={<ResidentProxiesPage />} />}
                 <Route path="profile" element={<ResidentProfilePage />} />
                 <Route path="*" element={<Navigate to="/resident" replace />} />
               </Route>
@@ -213,9 +249,13 @@ const AppContent = () => {
               {/* Portería / Security (Tablet-optimized Full CRUD) */}
               <Route path="/security" element={<SecurityLayout />}>
                 <Route index element={<SecurityDashboard />} />
+                <Route path="intercom" element={<SecurityIntercom />} />
                 <Route path="alerts" element={<SecurityAlerts />} />
             <Route path="visitors" element={<SecurityVisitors />} />
                 <Route path="packages" element={<SecurityPackages />} />
+                {/* Fase 3: bandeja compartida del chat con residentes. */}
+                <Route path="chat" element={<SecurityChatPage />} />
+                <Route path="profile" element={<SecurityProfilePage />} />
                 <Route path="*" element={<Navigate to="/security" replace />} />
               </Route>
 

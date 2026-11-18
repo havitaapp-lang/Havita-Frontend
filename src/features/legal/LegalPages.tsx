@@ -12,3 +12,7 @@ export const PrivacyPage: React.FC = () => {
 export const SecurityPage: React.FC = () => {
   return <LegalDocumentViewer documentUrl="/legal/security_v1.0.md" />;
 };
+
+export const PrivacyNoticePage: React.FC = () => {
+  return <LegalDocumentViewer documentUrl="/legal/privacy_notice_v1.0.md" />;
+};

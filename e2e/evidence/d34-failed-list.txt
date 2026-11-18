@@ -1,0 +1,14 @@
+[chromium] › tests\residents\residents-create.spec.ts:11:3 › Directorio de residentes · crear · usabilidad › el formulario cabe en una pantalla estándar (1366x860) y sus botones son alcanzables 
+[chromium] › tests\residents\residents-create.spec.ts:126:3 › Directorio de residentes · crear › registra un residente válido y aparece en el directorio 
+[chromium] › tests\residents\residents-create.spec.ts:155:3 › Directorio de residentes · crear › no permite registrar un correo ya existente y muestra el error del backend 
+[chromium] › tests\residents\residents-edit.spec.ts:15:3 › Directorio de residentes · editar › el modal se abre precargado con los datos del residente 
+[chromium] › tests\residents\residents-edit.spec.ts:32:3 › Directorio de residentes · editar › guardar cambios de nombre y teléfono actualiza el residente existente 
+[chromium] › tests\residents\residents-edit.spec.ts:59:3 › Directorio de residentes · editar › cambiar el estado a Inactivo se refleja en el listado 
+[chromium] › tests\residents\residents-filters.spec.ts:20:3 › Directorio de residentes · filtro por tipo › filtrar por Arrendatarios oculta a los propietarios 
+[chromium] › tests\residents\residents-filters.spec.ts:34:3 › Directorio de residentes · filtro por tipo › filtrar por Propietarios oculta a los arrendatarios 
+[chromium] › tests\residents\residents-list.spec.ts:36:3 › Directorio de residentes · listado › una fila muestra nombre, propiedad, tipo, contacto y estado del residente 
+[chromium] › tests\residents\residents-list.spec.ts:53:3 › Directorio de residentes · listado › pagina los resultados y el resumen refleja el total real 
+[chromium] › tests\residents\residents-my-home.spec.ts:122:3 › Mi Hogar · mascotas › registra, edita y elimina una mascota 
+[chromium] › tests\residents\residents-my-home.spec.ts:61:3 › Mi Hogar · vehículos › registra, edita y elimina un vehículo 
+[chromium] › tests\residents\residents-property-invitations.spec.ts:53:3 › Propiedades · invitación individual de residente › reabrir el modal muestra la invitación pendiente existente 
+[chromium] › tests\residents\residents-search.spec.ts:39:3 › Directorio de residentes · búsqueda › busca por número de apartamento, como anuncia el placeholder 

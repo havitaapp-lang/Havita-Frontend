@@ -9,7 +9,8 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useData } from '../../contexts/DataContext';
-import { useAuth } from '../../contexts/AuthContext';
+import { useActiveUnit } from '../../hooks/useActiveUnit';
+import { unitLabel } from './unit/activeUnitStore';
 import type { Visitor } from '../../types';
 import type { VisitorSettings } from '../../types/visitorSettings';
 import { visitorSettingsService } from '../../services/visitorSettingsService';
@@ -31,7 +32,8 @@ interface PersonEntry {
 }
 
 export const ResidentVisitors = () => {
-  const { user, activePropertyId, userProperties } = useAuth();
+  // Fase 2 / E2: única fuente de unidad (por pestaña, validada por el backend).
+  const { units: userProperties, activeUnitId: activePropertyId, activeUnit: activeProperty, activeLabel } = useActiveUnit();
   const { visitors, createGroupVisit, updateVisitor, deleteVisitor } = useData();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -47,9 +49,8 @@ export const ResidentVisitors = () => {
   const { getSmartInitialDate, getSmartInitialTime, formatExpectedAt } = useDateTimeSlots(undefined, visitorSettings);
 
   // Identificador o número de propiedad del residente (si está definido)
-  const myPropertyId = activePropertyId || user?.propertyUnit || 'Mi Unidad';
-  const activeProperty = userProperties?.find(p => p.propertyId === activePropertyId);
-  const activePropertyName = (activeProperty as any)?.path || activeProperty?.name || myPropertyId;
+  const myPropertyId = activePropertyId;
+  const activePropertyName = activeLabel || (activeProperty as any)?.path || activeProperty?.name || 'Mi unidad';
   
   // En el portal de residentes, el backend (`/resident/me/visitors`) ya devuelve única y exclusivamente
   // las visitas asociadas a la propiedad del residente autenticado. Por ende, si visitors tiene datos,
@@ -59,31 +60,83 @@ export const ResidentVisitors = () => {
     // Filter out canceled visits from the resident's view
     const activeVisitors = visitors;
     
-    // Si activePropertyId está definido y hay visitas con coincidencia, filtramos por esa propiedad
-    const filtered = activeVisitors.filter(v => {
-      if (activePropertyId && (v.propertyId === activePropertyId || (v as any).propertyId === activePropertyId)) {
-        return true;
-      }
-      if (activeProperty?.number && (v.propertyId === activeProperty.number || (v as any).propertyNumber === activeProperty.number)) {
-        return true;
-      }
-      if (activeProperty?.name && (v.propertyId === activeProperty.name || (v as any).propertyName === activeProperty.name)) {
-        return true;
-      }
-      if (user?.residentPropertyId && v.propertyId === user.residentPropertyId) {
-        return true;
-      }
-      if (user?.propertyUnit && (v.propertyId === user.propertyUnit || (v as any).propertyNumber === user.propertyUnit)) {
-        return true;
-      }
-      return false;
-    });
+    // Fase 2 / E2: solo visitas de la unidad activa (por id). Ya no se muestran "todas" cuando no hay coincidencia:
+    // eso mezclaba visitas de otra unidad tras cambiar de selección.
+    return activeVisitors.filter(v => !!activePropertyId && v.propertyId === activePropertyId);
+  }, [visitors, activePropertyId]);
 
-    // Si encontramos visitas específicas para esta unidad, las mostramos.
-    // De lo contrario, como el endpoint del residente (/resident/me/visitors) ya está
-    // acotado por seguridad en el backend a las unidades de este usuario, mostramos activeVisitors.
-    return activePropertyId ? filtered : activeVisitors;
-  }, [visitors, activePropertyId, user?.residentPropertyId, user?.propertyUnit, activeProperty]);
+  // Helper para extraer la marca de tiempo precisa de una visita
+  const parseVisitorDate = (v?: Visitor): number => {
+    if (!v) return 0;
+    if ((v as any).rawExpectedAt) {
+      const t = new Date((v as any).rawExpectedAt).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (v.expectedAt && (v.expectedAt.includes('T') || v.expectedAt.includes('-'))) {
+      const t = new Date(v.expectedAt).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (v.expectedAt) {
+      const text = v.expectedAt.toLowerCase().trim();
+      const now = new Date();
+      
+      if (text.startsWith('hoy')) {
+        const matchTime = text.match(/(\d+):(\d+)\s*(a\.?\s*m\.?|p\.?\s*m\.?)/i);
+        if (matchTime) {
+          let hour = parseInt(matchTime[1], 10);
+          const min = parseInt(matchTime[2], 10);
+          const isPm = matchTime[3].toLowerCase().includes('p');
+          if (isPm && hour < 12) hour += 12;
+          if (!isPm && hour === 12) hour = 0;
+          return new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, min).getTime();
+        }
+        return now.getTime();
+      }
+      
+      if (text.startsWith('mañana') || text.startsWith('manana')) {
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const matchTime = text.match(/(\d+):(\d+)\s*(a\.?\s*m\.?|p\.?\s*m\.?)/i);
+        if (matchTime) {
+          let hour = parseInt(matchTime[1], 10);
+          const min = parseInt(matchTime[2], 10);
+          const isPm = matchTime[3].toLowerCase().includes('p');
+          if (isPm && hour < 12) hour += 12;
+          if (!isPm && hour === 12) hour = 0;
+          return new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), hour, min).getTime();
+        }
+        return tomorrow.getTime();
+      }
+
+      const monthsMap: Record<string, number> = {
+        ene: 0, feb: 1, mar: 2, abr: 3, may: 4, jun: 5,
+        jul: 6, ago: 7, sep: 8, oct: 9, nov: 10, dic: 11
+      };
+      const dateMatch = text.match(/(\d{1,2})\s+de\s+([a-z]{3})/i);
+      if (dateMatch) {
+        const day = parseInt(dateMatch[1], 10);
+        const monthStr = dateMatch[2].toLowerCase();
+        const month = monthsMap[monthStr] !== undefined ? monthsMap[monthStr] : now.getMonth();
+        let hour = 12;
+        let min = 0;
+        const matchTime = text.match(/(\d+):(\d+)\s*(a\.?\s*m\.?|p\.?\s*m\.?)/i);
+        if (matchTime) {
+          hour = parseInt(matchTime[1], 10);
+          min = parseInt(matchTime[2], 10);
+          const isPm = matchTime[3].toLowerCase().includes('p');
+          if (isPm && hour < 12) hour += 12;
+          if (!isPm && hour === 12) hour = 0;
+        }
+        return new Date(now.getFullYear(), month, day, hour, min).getTime();
+      }
+    }
+
+    if (v.createdAt) {
+      const t = new Date(v.createdAt).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    return 0;
+  };
 
   // Group visitors by groupId or individual id
   const visitGroups = React.useMemo(() => {
@@ -94,13 +147,19 @@ export const ResidentVisitors = () => {
       groups[key].push(v);
     });
 
-    // Ordenar los grupos: 1. Autorizadas, 2. En curso/Adentro, 3. Finalizadas, 4. Expiradas
+    // Ordenar los grupos:
+    // 1. Activas / Pre-autorizadas (APPROVED, PENDING) -> Prioridad 1
+    // 2. En curso / En sitio (ENTERED) -> Prioridad 2
+    // 3. Finalizadas / Salieron (EXITED) -> Prioridad 3
+    // 4. Expiradas (EXPIRED) -> Prioridad 4
+    // 5. Canceladas (CANCELLED) -> Prioridad 5 (al final de todo)
     return Object.values(groups).sort((groupA, groupB) => {
       const getPriority = (group: Visitor[]) => {
-        if (group.every(v => v.status === 'EXITED')) return 3; // Finalizada
-        if (group.every(v => v.status === 'EXPIRED')) return 4; // Expirada
-        if (group.some(v => v.status === 'ENTERED' || v.status === 'EXITED')) return 2; // En curso o adentro
-        return 1; // Autorizada
+        if (group.every(v => v.status === 'CANCELLED')) return 5; // Cancelada
+        if (group.every(v => v.status === 'EXPIRED')) return 4;   // Expirada
+        if (group.every(v => v.status === 'EXITED')) return 3;    // Finalizada
+        if (group.some(v => v.status === 'ENTERED')) return 1;    // En curso / En sitio (Máxima prioridad)
+        return 2; // Pre-autorizada / Pendiente (Esperadas)
       };
 
       const priorityA = getPriority(groupA);
@@ -110,11 +169,11 @@ export const ResidentVisitors = () => {
         return priorityA - priorityB;
       }
 
-      // Si tienen la misma prioridad, ordenamos por la más reciente primero
-      const dateA = new Date(groupA[0].createdAt || 0).getTime();
-        const dateB = new Date(groupB[0].createdAt || 0).getTime();
-        if (!isNaN(dateB) && !isNaN(dateA) && dateB !== dateA) return dateB - dateA;
-        return String(groupB[0].id).localeCompare(String(groupA[0].id));
+      // Si tienen la misma prioridad, ordenamos por fecha de visita (más reciente primero)
+      const dateA = parseVisitorDate(groupA[0]);
+      const dateB = parseVisitorDate(groupB[0]);
+      if (!isNaN(dateB) && !isNaN(dateA) && dateB !== dateA) return dateB - dateA;
+      return String(groupB[0].id).localeCompare(String(groupA[0].id));
     });
   }, [myVisitors]);
 
@@ -146,13 +205,38 @@ export const ResidentVisitors = () => {
   const [showQRGroup, setShowQRGroup] = useState<Visitor[] | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
+  // Tabs de filtrado
+  type FilterTabType = 'TODAS' | 'APPROVED' | 'ENTERED' | 'HISTORY' | 'CANCELLED';
+  const [filterTab, setFilterTab] = useState<FilterTabType>('TODAS');
+
+  const countApproved = React.useMemo(() => visitGroups.filter(g => g.some(v => v.status === 'APPROVED' || v.status === 'PENDING')).length, [visitGroups]);
+  const countEntered = React.useMemo(() => visitGroups.filter(g => g.some(v => v.status === 'ENTERED')).length, [visitGroups]);
+  const countHistory = React.useMemo(() => visitGroups.filter(g => g.every(v => v.status === 'EXITED' || v.status === 'EXPIRED')).length, [visitGroups]);
+  const countCancelled = React.useMemo(() => visitGroups.filter(g => g.every(v => v.status === 'CANCELLED')).length, [visitGroups]);
+
+  const displayedGroups = React.useMemo(() => {
+    if (filterTab === 'APPROVED') {
+      return visitGroups.filter(g => g.some(v => v.status === 'APPROVED' || v.status === 'PENDING'));
+    }
+    if (filterTab === 'ENTERED') {
+      return visitGroups.filter(g => g.some(v => v.status === 'ENTERED'));
+    }
+    if (filterTab === 'HISTORY') {
+      return visitGroups.filter(g => g.every(v => v.status === 'EXITED' || v.status === 'EXPIRED'));
+    }
+    if (filterTab === 'CANCELLED') {
+      return visitGroups.filter(g => g.every(v => v.status === 'CANCELLED'));
+    }
+    return visitGroups;
+  }, [visitGroups, filterTab]);
+
   // Pagination
   const ITEMS_PER_PAGE = 5;
   const [currentPage, setCurrentPage] = useState(1);
-  const totalPages = Math.ceil(visitGroups.length / ITEMS_PER_PAGE) || 1;
+  const totalPages = Math.ceil(displayedGroups.length / ITEMS_PER_PAGE) || 1;
   // Asegurar que currentPage no se salga de los límites si se eliminan items
   const validCurrentPage = Math.min(currentPage, totalPages);
-  const currentGroups = visitGroups.slice((validCurrentPage - 1) * ITEMS_PER_PAGE, validCurrentPage * ITEMS_PER_PAGE);
+  const currentGroups = displayedGroups.slice((validCurrentPage - 1) * ITEMS_PER_PAGE, validCurrentPage * ITEMS_PER_PAGE);
 
   // Form State: 1 visit, N persons
   const [visitPurpose, setVisitPurpose] = useState('Visita familiar');
@@ -404,6 +488,64 @@ export const ResidentVisitors = () => {
         </Button>
       </div>
 
+      {/* Tabs de Filtro */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+        <button
+          onClick={() => { setFilterTab('TODAS'); setCurrentPage(1); }}
+          className={`px-3.5 py-1.5 rounded-2xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+            filterTab === 'TODAS'
+              ? 'bg-slate-900 text-white shadow-xs'
+              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          Todas ({visitGroups.length})
+        </button>
+        <button
+          onClick={() => { setFilterTab('APPROVED'); setCurrentPage(1); }}
+          className={`px-3.5 py-1.5 rounded-2xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+            filterTab === 'APPROVED'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          Pre-autorizadas ({countApproved})
+        </button>
+        <button
+          onClick={() => { setFilterTab('ENTERED'); setCurrentPage(1); }}
+          className={`px-3.5 py-1.5 rounded-2xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+            filterTab === 'ENTERED'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          En curso ({countEntered})
+        </button>
+        {countHistory > 0 && (
+          <button
+            onClick={() => { setFilterTab('HISTORY'); setCurrentPage(1); }}
+            className={`px-3.5 py-1.5 rounded-2xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+              filterTab === 'HISTORY'
+                ? 'bg-slate-800 text-white shadow-xs'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            Finalizadas ({countHistory})
+          </button>
+        )}
+        {countCancelled > 0 && (
+          <button
+            onClick={() => { setFilterTab('CANCELLED'); setCurrentPage(1); }}
+            className={`px-3.5 py-1.5 rounded-2xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+              filterTab === 'CANCELLED'
+                ? 'bg-rose-600 text-white shadow-xs'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            Canceladas ({countCancelled})
+          </button>
+        )}
+      </div>
+
       {/* Visits List Grouped */}
       <div className="space-y-4">
         {currentGroups.map((group) => {
@@ -440,14 +582,14 @@ export const ResidentVisitors = () => {
                 <div className="flex items-center gap-2 self-end sm:self-auto">
                   <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
                     allExited ? 'bg-slate-100 text-slate-600' :
-                    allEntered ? 'bg-emerald-100 text-emerald-800' :
+                    group.some(v => v.status === 'ENTERED') ? 'bg-emerald-100 text-emerald-800' :
                     allExpired ? 'bg-slate-50 text-slate-500 border border-slate-200' :
                     first.status === 'APPROVED' ? 'bg-blue-100 text-blue-800' :
                     first.status === 'EXITED' ? 'bg-rose-100 text-rose-800' :
                     first.status === 'EXPIRED' ? 'bg-slate-50 text-slate-500 border border-slate-200' :
                     first.status === 'CANCELLED' ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-amber-100 text-amber-800'
                   }`}>
-                    {first.status === 'ENTERED' ? 'En curso' : first.status === 'APPROVED' ? 'Pre-autorizada' : first.status === 'EXITED' ? 'Finalizada' : first.status === 'EXPIRED' ? 'Expirada' : first.status === 'CANCELLED' ? 'Cancelada' : 'Pendiente'}
+                    {allExited ? 'Finalizada' : group.some(v => v.status === 'ENTERED') ? 'En curso' : first.status === 'APPROVED' ? 'Pre-autorizada' : first.status === 'EXITED' ? 'Finalizada' : first.status === 'EXPIRED' ? 'Expirada' : first.status === 'CANCELLED' ? 'Cancelada' : 'Pendiente'}
                   </span>
 
                   <button
@@ -540,11 +682,19 @@ export const ResidentVisitors = () => {
           </div>
         )}
 
+        {visitGroups.length > 0 && displayedGroups.length === 0 && (
+          <div className="p-10 text-center bg-white rounded-3xl border border-slate-200 text-slate-400 text-xs space-y-2">
+            <ShieldCheck className="w-8 h-8 mx-auto text-slate-300" />
+            <p className="font-bold text-slate-700 text-sm">No hay visitas en esta categoría</p>
+            <p className="text-xs text-slate-400">Selecciona otra pestaña o pestaña 'Todas' para ver tus visitas.</p>
+          </div>
+        )}
+
         {/* Pagination Footer */}
         {totalPages > 1 && (
           <div className="flex items-center justify-between px-4 py-3 bg-white rounded-3xl border border-slate-200/80 shadow-xs">
             <span className="text-xs text-slate-500 font-medium">
-              Mostrando {(validCurrentPage - 1) * ITEMS_PER_PAGE + 1} a {Math.min(validCurrentPage * ITEMS_PER_PAGE, visitGroups.length)} de {visitGroups.length} visitas
+              Mostrando {(validCurrentPage - 1) * ITEMS_PER_PAGE + 1} a {Math.min(validCurrentPage * ITEMS_PER_PAGE, displayedGroups.length)} de {displayedGroups.length} visitas
             </span>
             <div className="flex items-center gap-1.5">
               <button
@@ -591,7 +741,7 @@ export const ResidentVisitors = () => {
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 Destino: <strong className="text-slate-800">
-                    {(userProperties?.find(p => p.propertyId === showQRGroup[0]?.propertyId) as any)?.path || userProperties?.find(p => p.propertyId === showQRGroup[0]?.propertyId)?.name || user?.propertyUnit || showQRGroup[0]?.propertyId}
+                    {unitLabel(userProperties?.find(p => p.propertyId === showQRGroup[0]?.propertyId)) || showQRGroup[0]?.propertyId}
                   </strong> • {showQRGroup[0]?.expectedAt || 'Hoy'}
               </p>
             </div>

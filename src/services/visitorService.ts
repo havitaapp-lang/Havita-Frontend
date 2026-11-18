@@ -1,5 +1,9 @@
 import { apiClient } from "../api/apiClient";
 import type { Visitor } from "../types";
+import { activeUnitStore } from "../features/resident/unit/activeUnitStore";
+
+/** Fase 2 / E2: las visitas del residente son de la unidad seleccionada (X-Property-Id, validada por el backend). */
+const unit = (unitId?: string | null) => ({ unitId: unitId ?? activeUnitStore.getActiveUnitId() });
 
 export interface CreateVisitorDto {
   name: string;
@@ -14,23 +18,23 @@ export interface CreateVisitorDto {
 
 export const visitorService = {
   // Endpoints del residente (autenticado, IDOR seguro)
-  getMyVisitors: async (): Promise<Visitor[]> => {
-    const res = await apiClient.get<any>("/resident/me/visitors");
+  getMyVisitors: async (unitId?: string | null): Promise<Visitor[]> => {
+    const res = await apiClient.get<any>("/resident/me/visitors", undefined, unit(unitId));
     if (!Array.isArray(res)) return [];
     return res.map(mapBackendVisitor);
   },
 
-  createMyVisitor: async (data: CreateVisitorDto): Promise<Visitor> => {
-    const res = await apiClient.post<any>("/resident/me/visitors", data);
+  createMyVisitor: async (data: CreateVisitorDto, unitId?: string | null): Promise<Visitor> => {
+    const res = await apiClient.post<any>("/resident/me/visitors", data, unit(unitId));
     return mapBackendVisitor(res);
   },
 
-  deleteMyVisitor: async (visitorId: string): Promise<void> => {
-    await apiClient.delete<void>(`/resident/me/visitors/${visitorId}`);
+  deleteMyVisitor: async (visitorId: string, unitId?: string | null): Promise<void> => {
+    await apiClient.delete<void>(`/resident/me/visitors/${visitorId}`, unit(unitId));
   },
 
-  updateMyVisitor: async (visitorId: string, data: Partial<CreateVisitorDto>): Promise<Visitor> => {
-    const res = await apiClient.put<any>(`/resident/me/visitors/${visitorId}`, data);
+  updateMyVisitor: async (visitorId: string, data: Partial<CreateVisitorDto>, unitId?: string | null): Promise<Visitor> => {
+    const res = await apiClient.put<any>(`/resident/me/visitors/${visitorId}`, data, unit(unitId));
     return mapBackendVisitor(res);
   },
 
@@ -88,9 +92,10 @@ function mapBackendVisitor(v: any): Visitor {
     documentId: v.documentId,
     status: (status as Visitor['status']) || 'PENDING',
     expectedAt: formatFriendlyDateTime(v.expectedAt),
+    rawExpectedAt: v.expectedAt,
     enteredAt: formatFriendlyDateTime(v.enteredAt),
     exitedAt: formatFriendlyDateTime(v.exitedAt),
-      createdAt: v.createdAt,
+    createdAt: v.createdAt,
     vehiclePlate: v.vehiclePlate,
     observations: v.observations,
     visitPurpose: v.visitPurpose,

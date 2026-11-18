@@ -20,7 +20,7 @@ export const residentSchema = z.object({
     .max(FIELD_LIMITS.PHONE_MAX_LENGTH, VALIDATION_MESSAGES.MAX_LENGTH('El teléfono', FIELD_LIMITS.PHONE_MAX_LENGTH))
     .regex(/^\+?[0-9\s-]{7,20}$/, VALIDATION_MESSAGES.INVALID_PHONE),
   propertyId: z
-    .string()
+    .string({ error: VALIDATION_MESSAGES.REQUIRED('La propiedad o unidad') })
     .trim()
     .min(1, VALIDATION_MESSAGES.REQUIRED('La propiedad o unidad')),
   type: z.enum(['Propietario', 'Arrendatario'], {

@@ -17,8 +17,10 @@ export const propertiesService = {
     let detectedType = 'Torres';
 
     properties.forEach((p) => {
-      const sName = p.structureName || (p.path ? p.path.split('->')[0].trim() : 'Estructura 1');
-      structureSet.add(sName);
+      // Fase 2 / E4: se cuentan estructuras reales (por id). Una unidad sin estructura no es "otra torre"; solo las
+      // rutas antiguas con "->" aportan su prefijo.
+      if (p.structureId) structureSet.add(`id:${p.structureId}`);
+      else if (p.path && p.path.includes('->')) structureSet.add(`ruta:${p.path.split('->')[0].trim()}`);
 
       if (p.structureType === 'Bloque') detectedType = 'Bloques';
       else if (p.structureType === 'Manzana') detectedType = 'Manzanas';
@@ -58,7 +60,8 @@ export const propertiesService = {
     }>();
 
     properties.forEach((p) => {
-      const sName = p.structureName || (p.path ? p.path.split('->')[0].trim() : 'Estructura General');
+      // Fase 2 / E4: una unidad sin estructura va a "Sin estructura" (antes cada una contaba como una torre propia).
+      const sName = p.structureName || (p.path && p.path.includes('->') ? p.path.split('->')[0].trim() : 'Sin estructura');
       const sType = p.structureType || 'Torre';
       const level = p.level ?? 1;
 

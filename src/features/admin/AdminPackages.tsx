@@ -160,7 +160,12 @@ export const AdminPackages = () => {
     }
   };
 
-  const handleDelete = async (id: string, recipient: string) => {
+  const handleDelete = async (id: string, recipient: string, status?: string) => {
+    if (status === 'DELIVERED') {
+      notificationService.showToast('No se puede eliminar un paquete que ya ha sido entregado', 'error');
+      return;
+    }
+
     const confirmed = await notificationService.showConfirm(
       '¿Eliminar registro?',
       `¿Deseas eliminar la encomienda para ${recipient}? Esta acción no se puede deshacer.`,
@@ -427,13 +432,15 @@ export const AdminPackages = () => {
                     <Edit className="w-3.5 h-3.5" />
                     Editar
                   </button>
-                  <button 
-                    onClick={() => handleDelete(pkg.id, pkg.recipientName)}
-                    className="min-h-[40px] px-3 py-2 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition-colors flex items-center justify-center gap-1.5"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Eliminar
-                  </button>
+                  {pkg.status !== 'DELIVERED' && (
+                    <button 
+                      onClick={() => handleDelete(pkg.id, pkg.recipientName, pkg.status)}
+                      className="min-h-[40px] px-3 py-2 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Eliminar
+                    </button>
+                  )}
                 </div>
               </div>
             ))
@@ -534,13 +541,15 @@ export const AdminPackages = () => {
                         >
                           <Edit className="w-4 h-4" />
                         </button>
-                        <button 
-                          onClick={() => handleDelete(pkg.id, pkg.recipientName)}
-                          className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                          title="Eliminar"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {pkg.status !== 'DELIVERED' && (
+                          <button 
+                            onClick={() => handleDelete(pkg.id, pkg.recipientName, pkg.status)}
+                            className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="Eliminar"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -671,6 +680,8 @@ export const AdminPackages = () => {
                     <option value="Inter Rapidísimo">Inter Rapidísimo</option>
                     <option value="FedEx">FedEx</option>
                     <option value="DHL">DHL</option>
+                    <option value="Rappi">Rappi</option>
+                    <option value="Didi">Didi</option>
                     <option value="Otro">Otro</option>
                   </select>
                 </FormField>
@@ -805,6 +816,8 @@ export const AdminPackages = () => {
                   <option value="Inter Rapidísimo">Inter Rapidísimo</option>
                   <option value="FedEx">FedEx</option>
                   <option value="DHL">DHL</option>
+                  <option value="Rappi">Rappi</option>
+                  <option value="Didi">Didi</option>
                   <option value="Otro">Otro / Mensajería Local</option>
                 </select>
               </div>

@@ -198,3 +198,30 @@
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
 }
+/*
+ * iOS: evitar el zoom automático al enfocar un campo (y que la página quede ampliada al cerrar el teclado).
+ *
+ * Safari/WebKit de iPhone y iPad amplía la página al enfocar un campo editable con letra < 16px. Los campos de Havita
+ * usan text-xs/text-sm (12–14px) o heredan ese tamaño del contenedor (preflight: font: inherit).
+ *
+ * Solución solo con CSS y solo en iOS (`-webkit-touch-callout` solo existe en WebKit de iOS; Android y escritorio no
+ * cambian). No se toca el viewport: el zoom manual con los dedos sigue disponible (maximum-scale=5, sin user-scalable=no).
+ *  1. Campos con clase de tamaño pequeño: dentro del campo, --text-xs/--text-sm/--text-base valen al menos 16px
+ *     (Tailwind 4 genera .text-sm { font-size: var(--text-sm) }). text-lg y mayores no cambian.
+ *  2. Campos que heredan el tamaño: max(16px, 1em) — si el contenedor tiene un tamaño mayor (p. ej. por accesibilidad),
+ *     se respeta.
+ * En la capa base y sin !important: cualquier clase de tamaño mayor sigue mandando.
+ */
+@layer base {
+  @supports (-webkit-touch-callout: none) {
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="hidden"], [type="button"], [type="submit"], [type="reset"], [type="image"]),
+    textarea,
+    select,
+    [contenteditable]:not([contenteditable="false"]) {
+      --text-xs: max(16px, 0.75rem);
+      --text-sm: max(16px, 0.875rem);
+      --text-base: max(16px, 1rem);
+      font-size: max(16px, 1em);
+    }
+  }
+}

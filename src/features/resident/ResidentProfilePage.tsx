@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   User as UserIcon,
   Phone,
@@ -15,9 +16,17 @@ import {
   Shield,
   Clock,
   Loader2,
+  Bell,
+  BellOff,
+  Smartphone,
+  Send,
 } from 'lucide-react';
 import { profileService, type UserProfileDto, type UpdateProfileDto } from '../../services/profileService';
 import { useAuth } from '../../contexts/AuthContext';
+import { pushNotificationService, type PushSubscriptionStatus } from '../../services/pushNotificationService';
+import { validateForm } from '../../validation/validators/formValidator';
+import { profileSchema } from '../../validation/schemas';
+import { formatPhoneInput } from '../../utils/formatters';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -82,14 +91,27 @@ export default function ResidentProfilePage() {
   const { user, updateUser, logout } = useAuth() as any;
   const navigate = useNavigate();
 
-  // ── Profile state ──
-  const [profile, setProfile] = useState<UserProfileDto | null>(null);
-  const [loadingProfile, setLoadingProfile] = useState(true);
-  const [profileError, setProfileError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  // ── Profile query (cached with React Query) ──
+  const {
+    data: profile,
+    isLoading: loadingProfile,
+    error: profileQueryError,
+  } = useQuery({
+    queryKey: ['user-profile'],
+    queryFn: () => profileService.getProfile(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const profileError = profileQueryError
+    ? (profileQueryError as any)?.message || 'No se pudo cargar tu perfil.'
+    : null;
 
   // ── Edit mode ──
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<UpdateProfileDto>({ fullName: '', phone: '' });
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -106,25 +128,27 @@ export default function ResidentProfilePage() {
   const [pwError, setPwError] = useState<string | null>(null);
   const [pwSuccess, setPwSuccess] = useState(false);
 
-  // ── Load profile ──
-  useEffect(() => {
-    setLoadingProfile(true);
-    profileService
-      .getProfile()
-      .then((data) => {
-        setProfile(data);
-        setEditForm({ fullName: data.fullName, phone: data.phone ?? '' });
-      })
-      .catch((err: any) => {
-        setProfileError(err?.message || 'No se pudo cargar tu perfil.');
-      })
-      .finally(() => setLoadingProfile(false));
-  }, []);
+  // ── Push notifications query (cached with React Query) ──
+  const pushSupported = pushNotificationService.isSupported();
+  const {
+    data: pushStatus = null,
+  } = useQuery({
+    queryKey: ['push-status'],
+    queryFn: () => pushNotificationService.getStatus(),
+    enabled: pushSupported,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
+  const [pushSuccess, setPushSuccess] = useState<string | null>(null);
+  const [testSending, setTestSending] = useState(false);
 
   // ── Edit handlers ──
   const handleStartEdit = () => {
     if (!profile) return;
     setEditForm({ fullName: profile.fullName, phone: profile.phone ?? '' });
+    setErrors({});
     setSaveError(null);
     setSaveSuccess(false);
     setEditing(true);
@@ -132,21 +156,37 @@ export default function ResidentProfilePage() {
 
   const handleCancelEdit = () => {
     setEditing(false);
+    setErrors({});
     setSaveError(null);
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editForm.fullName.trim()) {
-      setSaveError('El nombre completo es requerido.');
+
+    const normalized = {
+      fullName: (editForm.fullName || '').trim(),
+      phone: (editForm.phone || '').trim(),
+    };
+
+    const validation = validateForm(profileSchema, normalized);
+    if (!validation.success) {
+      setErrors(validation.errors);
+      setSaveError(validation.errorList[0]?.message || 'Por favor corrige los errores del formulario.');
       return;
     }
+
+    setErrors({});
     setSaving(true);
     setSaveError(null);
     try {
-      const updated = await profileService.updateProfile(editForm);
-      setProfile(updated);
-      // Sincronizar nombre en el estado de sesión global
+      const updated = await profileService.updateProfile(normalized);
+      queryClient.setQueryData(['user-profile'], updated);
+      queryClient.invalidateQueries({ queryKey: ['user-profile'] });
+      queryClient.invalidateQueries({ queryKey: ['myPeople'] });
+      queryClient.invalidateQueries({ queryKey: ['residents'] });
+      queryClient.invalidateQueries({ queryKey: ['my-property-info'] });
+      queryClient.invalidateQueries({ queryKey: ['my-properties'] });
+      // Sincronizar nombre y teléfono en el estado de sesión global
       updateUser({ name: updated.fullName, phone: updated.phone });
       setEditing(false);
       setSaveSuccess(true);
@@ -180,6 +220,7 @@ export default function ResidentProfilePage() {
       setPwSuccess(true);
       // El backend revocó todos los refresh tokens → forzar re-login
       setTimeout(() => {
+        queryClient.clear();
         logout();
         navigate('/login', {
           replace: true,
@@ -199,6 +240,59 @@ export default function ResidentProfilePage() {
       }
     } finally {
       setChangingPw(false);
+    }
+  };
+
+  // ── Push handlers ──
+  const handleTogglePush = async () => {
+    if (!pushSupported) return;
+    setPushLoading(true);
+    setPushError(null);
+    setPushSuccess(null);
+    try {
+      if (pushStatus?.subscribed) {
+        const res = await pushNotificationService.unsubscribe();
+        if (res.success) {
+          queryClient.setQueryData<PushSubscriptionStatus | null>(['push-status'], (prev) =>
+            prev ? { ...prev, subscribed: false, deviceCount: Math.max(0, prev.deviceCount - 1) } : null
+          );
+          await queryClient.invalidateQueries({ queryKey: ['push-status'] });
+          setPushSuccess('Notificaciones push desactivadas para este dispositivo.');
+        } else {
+          setPushError(res.error || 'No se pudo desactivar las notificaciones.');
+        }
+      } else {
+        const res = await pushNotificationService.subscribe();
+        if (res.success) {
+          await queryClient.invalidateQueries({ queryKey: ['push-status'] });
+          setPushSuccess('¡Notificaciones push activadas exitosamente!');
+        } else {
+          setPushError(res.error || 'No se pudo activar las notificaciones.');
+        }
+      }
+    } catch (e: any) {
+      setPushError(e?.message || 'Error al gestionar notificaciones push.');
+    } finally {
+      setPushLoading(false);
+      setTimeout(() => setPushSuccess(null), 4000);
+    }
+  };
+
+  const handleSendTestPush = async () => {
+    setTestSending(true);
+    setPushError(null);
+    try {
+      const res = await pushNotificationService.sendTest();
+      if (res.sent > 0) {
+        setPushSuccess(`Notificación de prueba enviada a ${res.sent} dispositivo(s).`);
+      } else {
+        setPushError('No hay dispositivos activos registrados para recibir la prueba.');
+      }
+    } catch (e: any) {
+      setPushError(e?.message || 'Error al enviar la notificación de prueba.');
+    } finally {
+      setTestSending(false);
+      setTimeout(() => setPushSuccess(null), 4000);
     }
   };
 
@@ -258,13 +352,28 @@ export default function ResidentProfilePage() {
             <div>
               <h2 className="text-lg font-bold text-slate-800">{profile.fullName}</h2>
               <p className="text-sm text-slate-500">{profile.email}</p>
-              <span className={`inline-block mt-1 px-2 py-0.5 text-[10px] font-bold rounded-full ${
-                profile.status === 'ACTIVE'
-                  ? 'bg-green-100 text-green-700'
-                  : 'bg-slate-100 text-slate-500'
-              }`}>
-                {profile.status === 'ACTIVE' ? 'Cuenta activa' : profile.status}
-              </span>
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className={`inline-block px-2 py-0.5 text-[10px] font-bold rounded-full ${
+                  profile.status === 'ACTIVE'
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-slate-100 text-slate-500'
+                }`}>
+                  {profile.status === 'ACTIVE' ? 'Cuenta activa' : profile.status}
+                </span>
+                {user?.role && (
+                  <span className="inline-block px-2 py-0.5 text-[10px] font-bold rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                    {user.role === 'COMMUNITY_ADMIN'
+                      ? 'Administrador'
+                      : user.role === 'SUPER_ADMIN'
+                      ? 'Super Admin'
+                      : user.role === 'RESIDENT'
+                      ? 'Residente'
+                      : user.role === 'SECURITY'
+                      ? 'Seguridad'
+                      : user.role}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -312,20 +421,30 @@ export default function ResidentProfilePage() {
             {/* Nombre completo */}
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">
-                Nombre completo
+                Nombre completo <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input
                   type="text"
                   value={editForm.fullName}
-                  onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
-                  className="w-full pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--tenant-primary)]/30 focus:border-[var(--tenant-primary)] bg-white"
+                  onChange={(e) => {
+                    setEditForm({ ...editForm, fullName: e.target.value });
+                    if (errors.fullName) setErrors((prev) => ({ ...prev, fullName: '' }));
+                  }}
+                  className={`w-full pl-9 pr-4 py-2.5 text-sm border rounded-xl focus:outline-none focus:ring-2 bg-white transition-colors ${
+                    errors.fullName
+                      ? 'border-red-300 focus:ring-red-100 focus:border-red-500'
+                      : 'border-slate-200 focus:ring-[var(--tenant-primary)]/30 focus:border-[var(--tenant-primary)]'
+                  }`}
                   placeholder="Tu nombre completo"
-                  maxLength={150}
+                  maxLength={100}
                   required
                 />
               </div>
+              {errors.fullName && (
+                <p className="text-xs text-red-500 mt-1 font-medium">{errors.fullName}</p>
+              )}
             </div>
 
             {/* Email (solo lectura) */}
@@ -350,19 +469,46 @@ export default function ResidentProfilePage() {
             {/* Teléfono */}
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">
-                Teléfono
+                Teléfono <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input
                   type="tel"
-                  value={editForm.phone}
-                  onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                  className="w-full pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--tenant-primary)]/30 focus:border-[var(--tenant-primary)] bg-white"
-                  placeholder="Ej. 3001234567"
-                  maxLength={50}
+                  value={editForm.phone ?? ''}
+                  onKeyDown={(e) => {
+                    // Prevenir teclas alfabéticas y símbolos inválidos (permitir control, flechas, backspace, dígitos, +, espacios)
+                    if (
+                      !e.ctrlKey &&
+                      !e.metaKey &&
+                      e.key.length === 1 &&
+                      !/[\d\s+-]/.test(e.key)
+                    ) {
+                      e.preventDefault();
+                    }
+                  }}
+                  onChange={(e) => {
+                    const formatted = formatPhoneInput(e.target.value);
+                    setEditForm({ ...editForm, phone: formatted });
+                    if (errors.phone) setErrors((prev) => ({ ...prev, phone: '' }));
+                  }}
+                  className={`w-full pl-9 pr-4 py-2.5 text-sm border rounded-xl focus:outline-none focus:ring-2 bg-white transition-colors ${
+                    errors.phone
+                      ? 'border-red-300 focus:ring-red-100 focus:border-red-500'
+                      : 'border-slate-200 focus:ring-[var(--tenant-primary)]/30 focus:border-[var(--tenant-primary)]'
+                  }`}
+                  placeholder="Ej. 300 123 4567"
+                  maxLength={20}
+                  required
                 />
               </div>
+              {errors.phone ? (
+                <p className="text-xs text-red-500 mt-1 font-medium">{errors.phone}</p>
+              ) : (
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Solo números. Mínimo 7 dígitos.
+                </p>
+              )}
             </div>
 
             {/* Actions */}
@@ -402,9 +548,9 @@ export default function ResidentProfilePage() {
           CARD 2 — SEGURIDAD
       ════════════════════════════════════════════════════ */}
       <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="px-6 pt-6 pb-4 flex items-center justify-between gap-4">
+        <div className="p-5 sm:p-6 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center shrink-0">
               <Shield className="w-5 h-5 text-slate-500" />
             </div>
             <div>
@@ -421,7 +567,7 @@ export default function ResidentProfilePage() {
                 setPwSuccess(false);
                 setPwForm({ currentPassword: '', newPassword: '', confirmNewPassword: '' });
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors shrink-0"
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl sm:rounded-full transition-colors w-full sm:w-auto shrink-0"
             >
               <Lock className="w-3.5 h-3.5" />
               Cambiar contraseña
@@ -432,7 +578,7 @@ export default function ResidentProfilePage() {
         {/* Password row (collapsed) */}
         {!showPasswordSection && (
           <>
-            <div className="border-t border-slate-100 mx-6" />
+            <div className="border-t border-slate-100 mx-5 sm:mx-6" />
             <div className="px-6 py-4 flex items-center justify-between">
               <div>
                 <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Contraseña</p>
@@ -570,6 +716,133 @@ export default function ResidentProfilePage() {
             )}
           </>
         )}
+      </div>
+
+      {/* ════════════════════════════════════════════════════
+          CARD 3 — NOTIFICACIONES PUSH
+      ════════════════════════════════════════════════════ */}
+      <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="p-5 sm:p-6 pb-4 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+              pushStatus?.subscribed ? 'bg-amber-50 text-amber-600' : 'bg-slate-100 text-slate-500'
+            }`}>
+              {pushStatus?.subscribed ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-bold text-slate-800">Notificaciones Push</h3>
+                {pushStatus?.subscribed ? (
+                  <span className="inline-block px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    Activadas
+                  </span>
+                ) : (
+                  <span className="inline-block px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-100 text-slate-600">
+                    Inactivas
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Avisos en tiempo real para visitas, paquetes recibidos y emergencias SOS.
+              </p>
+            </div>
+          </div>
+
+          {pushSupported && (
+            <button
+              onClick={handleTogglePush}
+              disabled={pushLoading}
+              className={`flex items-center justify-center gap-1.5 px-4 py-2 sm:py-1.5 text-xs font-semibold rounded-xl sm:rounded-full transition-all w-full sm:w-auto shrink-0 ${
+                pushStatus?.subscribed
+                  ? 'text-slate-600 bg-slate-100 hover:bg-slate-200'
+                  : 'text-white bg-[var(--tenant-primary)] hover:opacity-90 shadow-sm'
+              } disabled:opacity-50`}
+            >
+              {pushLoading ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Procesando...</span>
+                </>
+              ) : pushStatus?.subscribed ? (
+                <>
+                  <BellOff className="w-3.5 h-3.5" />
+                  <span>Desactivar</span>
+                </>
+              ) : (
+                <>
+                  <Bell className="w-3.5 h-3.5" />
+                  <span>Activar notificaciones</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
+
+        <div className="border-t border-slate-100 mx-5 sm:mx-6" />
+
+        <div className="px-5 sm:px-6 py-4 space-y-3">
+          {/* Status feedback alerts */}
+          {pushSuccess && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-medium">
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+              <span>{pushSuccess}</span>
+            </div>
+          )}
+
+          {pushError && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-medium">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{pushError}</span>
+            </div>
+          )}
+
+          {!pushSupported ? (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+              <p className="font-semibold">Navegador no compatible</p>
+              <p className="mt-0.5">
+                Este navegador o dispositivo no soporta la API estándar de notificaciones Push. En iOS, asegúrate de instalar la aplicación en tu pantalla de inicio (PWA) desde Safari con iOS 16.4+.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs text-slate-500 gap-2">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-slate-400" />
+                  <span>
+                    {pushStatus?.deviceCount
+                      ? `${pushStatus.deviceCount} dispositivo(s) suscrito(s) a tu cuenta`
+                      : 'Ningún dispositivo suscrito actualmente'}
+                  </span>
+                </div>
+
+                {pushStatus?.subscribed && (
+                  <button
+                    type="button"
+                    onClick={handleSendTestPush}
+                    disabled={testSending}
+                    className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors w-fit disabled:opacity-50"
+                  >
+                    {testSending ? (
+                      <>
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        <span>Enviando prueba...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3 h-3 text-slate-500" />
+                        <span>Probar notificación</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              <p className="text-[11px] text-slate-400">
+                Las notificaciones push funcionan en segundo plano cuando la pestaña esté cerrada. Puedes desactivarlas en cualquier momento desde este panel o en los ajustes de tu navegador.
+              </p>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

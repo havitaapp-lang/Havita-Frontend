@@ -18,6 +18,73 @@ import type { AdminCommonZonesTabRef } from './AdminCommonZonesTab';
 
 const ITEMS_PER_PAGE = 8;
 
+const getReservationStatusLabel = (status: string | undefined | null): string => {
+  if (!status) return 'Pendiente';
+  const s = String(status).toUpperCase().trim();
+  switch (s) {
+    case 'CONFIRMED':
+    case 'CONFIRMADA':
+    case 'APPROVED':
+    case 'APROBADA':
+      return 'Confirmada';
+    case 'PENDING':
+    case 'PENDIENTE':
+      return 'Pendiente';
+    case 'REJECTED':
+    case 'RECHAZADA':
+      return 'Rechazada';
+    case 'CANCELLED':
+    case 'CANCELED':
+    case 'CANCELADA':
+      return 'Cancelada';
+    case 'COMPLETED':
+    case 'COMPLETADA':
+      return 'Completada';
+    default:
+      return status;
+  }
+};
+
+const isPendingStatus = (status?: string): boolean => {
+  if (!status) return false;
+  const s = String(status).toUpperCase().trim();
+  return s === 'PENDING' || s === 'PENDIENTE';
+};
+
+const isConfirmedStatus = (status?: string): boolean => {
+  if (!status) return false;
+  const s = String(status).toUpperCase().trim();
+  return s === 'CONFIRMED' || s === 'CONFIRMADA' || s === 'APPROVED' || s === 'APROBADA';
+};
+
+const isRejectedStatus = (status?: string): boolean => {
+  if (!status) return false;
+  const s = String(status).toUpperCase().trim();
+  return s === 'REJECTED' || s === 'RECHAZADA';
+};
+
+const isCancelledStatus = (status?: string): boolean => {
+  if (!status) return false;
+  const s = String(status).toUpperCase().trim();
+  return s === 'CANCELLED' || s === 'CANCELED' || s === 'CANCELADA';
+};
+
+const getStatusBadgeClass = (status?: string): string => {
+  if (isConfirmedStatus(status)) return 'bg-emerald-50 text-emerald-700';
+  if (isPendingStatus(status)) return 'bg-amber-50 text-amber-700';
+  if (isRejectedStatus(status)) return 'bg-rose-50 text-rose-700';
+  if (isCancelledStatus(status)) return 'bg-slate-100 text-slate-600';
+  return 'bg-blue-50 text-blue-700';
+};
+
+const getStatusDotClass = (status?: string): string => {
+  if (isConfirmedStatus(status)) return 'bg-emerald-500';
+  if (isPendingStatus(status)) return 'bg-amber-500';
+  if (isRejectedStatus(status)) return 'bg-rose-500';
+  if (isCancelledStatus(status)) return 'bg-slate-400';
+  return 'bg-blue-500';
+};
+
 export const AdminReservations = () => {
   const { currentTenant } = useTenant();
   const { reservations, commonZones, createReservation, updateReservation, deleteReservation, changeReservationStatus, properties } = useData();
@@ -61,6 +128,8 @@ export const AdminReservations = () => {
     observations: ''
   });
 
+  const selectedZone = commonZones.find(z => z.name === formData.zone);
+
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [errorList, setErrorList] = useState<Array<{ field: string; message: string }>>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -71,7 +140,7 @@ export const AdminReservations = () => {
       r.propertyId.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.zone.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesZone = filterZone === 'Todos' || r.zone === filterZone;
-    const matchesStatus = filterStatus === 'Todos' || r.status === filterStatus;
+    const matchesStatus = filterStatus === 'Todos' || getReservationStatusLabel(r.status) === filterStatus;
     return matchesSearch && matchesZone && matchesStatus;
   });
 
@@ -109,7 +178,7 @@ export const AdminReservations = () => {
       startTime: resv.startTime,
       endTime: resv.endTime,
       guestsCount: resv.guestsCount || 10,
-      status: resv.status,
+      status: getReservationStatusLabel(resv.status) as any,
       observations: resv.observations || ''
     });
     setErrors({});
@@ -162,6 +231,14 @@ export const AdminReservations = () => {
         const errorMsg = `El horario permitido para esta zona es de ${openTime} a ${closeTime}.`;
         setErrors({ startTime: errorMsg, endTime: errorMsg });
         setErrorList([{ field: 'startTime', message: errorMsg }]);
+        return;
+      }
+
+      // Validar capacidad máxima de la zona
+      if (selectedZone.capacity && normalized.attendees > selectedZone.capacity) {
+        const errorMsg = `La capacidad máxima permitida para ${selectedZone.name} es de ${selectedZone.capacity} asistentes.`;
+        setErrors({ attendees: errorMsg });
+        setErrorList([{ field: 'attendees', message: errorMsg }]);
         return;
       }
     }
@@ -310,6 +387,7 @@ export const AdminReservations = () => {
               <option value="Todos">Todos los estados</option>
               <option value="Confirmada">Confirmada</option>
               <option value="Pendiente">Pendiente</option>
+              <option value="Rechazada">Rechazada</option>
               <option value="Cancelada">Cancelada</option>
             </select>
           </div>
@@ -345,8 +423,8 @@ export const AdminReservations = () => {
                           {resv.adminNotes && (
                             <div className="text-[11px] leading-tight text-amber-600 bg-amber-50 p-1.5 rounded-md border border-amber-100">
                               <span className="font-semibold block text-amber-800">
-                                {resv.status === 'Rechazada' ? 'Motivo de rechazo:' :
-                                 resv.status === 'Cancelada' ? 'Cancelada:' :
+                                {isRejectedStatus(resv.status) ? 'Motivo de rechazo:' :
+                                 isCancelledStatus(resv.status) ? 'Cancelada:' :
                                  'Nota Admin:'}
                               </span>
                               {resv.adminNotes}
@@ -357,19 +435,9 @@ export const AdminReservations = () => {
                     </div>
                   </div>
 
-                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
-                    resv.status === 'Confirmada' ? 'bg-emerald-50 text-emerald-700' :
-                    resv.status === 'PENDING' ? 'bg-amber-50 text-amber-700' :
-                    resv.status === 'Rechazada' ? 'bg-rose-50 text-rose-700' :
-                    'bg-slate-100 text-slate-600'
-                  }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${
-                      resv.status === 'Confirmada' ? 'bg-emerald-500' :
-                      resv.status === 'PENDING' ? 'bg-amber-500' :
-                      resv.status === 'Rechazada' ? 'bg-rose-500' :
-                      'bg-slate-400'
-                    }`} />
-                    {resv.status}
+                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${getStatusBadgeClass(resv.status)}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${getStatusDotClass(resv.status)}`} />
+                    {getReservationStatusLabel(resv.status)}
                   </span>
                 </div>
 
@@ -389,7 +457,7 @@ export const AdminReservations = () => {
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                  {resv.status === 'PENDING' && (
+                  {isPendingStatus(resv.status) && (
                     <>
                       <button
                         onClick={async (e) => {
@@ -490,8 +558,8 @@ export const AdminReservations = () => {
                               {resv.adminNotes && (
                                 <div className="text-[11px] leading-tight text-amber-600 bg-amber-50 p-1.5 rounded-md border border-amber-100 max-w-xs">
                                   <span className="font-semibold block text-amber-800">
-                                    {resv.status === 'Rechazada' ? 'Motivo de rechazo:' :
-                                     resv.status === 'Cancelada' ? 'Cancelada:' :
+                                    {isRejectedStatus(resv.status) ? 'Motivo de rechazo:' :
+                                     isCancelledStatus(resv.status) ? 'Cancelada:' :
                                      'Nota Admin:'}
                                   </span>
                                   {resv.adminNotes}
@@ -517,24 +585,14 @@ export const AdminReservations = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                        resv.status === 'Confirmada' ? 'bg-emerald-50 text-emerald-700' :
-                        resv.status === 'PENDING' ? 'bg-amber-50 text-amber-700' :
-                        resv.status === 'Rechazada' ? 'bg-rose-50 text-rose-700' :
-                        'bg-slate-100 text-slate-600'
-                      }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${
-                          resv.status === 'Confirmada' ? 'bg-emerald-500' :
-                          resv.status === 'PENDING' ? 'bg-amber-500' :
-                          resv.status === 'Rechazada' ? 'bg-rose-500' :
-                          'bg-slate-400'
-                        }`} />
-                        {resv.status}
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${getStatusBadgeClass(resv.status)}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${getStatusDotClass(resv.status)}`} />
+                        {getReservationStatusLabel(resv.status)}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        {resv.status === 'PENDING' && (
+                        {isPendingStatus(resv.status) && (
                           <>
                             <button
                               onClick={async () => {
@@ -661,12 +719,23 @@ export const AdminReservations = () => {
                   id="admin-res-zone"
                   name="zone"
                   value={formData.zone}
-                  onChange={(e) => setFormData({ ...formData, zone: e.target.value as any })}
+                  onChange={(e) => {
+                    const newZoneName = e.target.value as any;
+                    const z = commonZones.find(item => item.name === newZoneName);
+                    const maxCap = z?.capacity ? Number(z.capacity) : FIELD_LIMITS.RESERVATION_MAX_ATTENDEES;
+                    let guests = formData.guestsCount;
+                    if (Number(guests) > maxCap) {
+                      guests = maxCap;
+                    }
+                    setFormData({ ...formData, zone: newZoneName, guestsCount: guests });
+                    if (errors.zone) setErrors(prev => ({ ...prev, zone: '' }));
+                    if (errors.attendees) setErrors(prev => ({ ...prev, attendees: '' }));
+                  }}
                   className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
                 >
                   <option value="">Seleccione una zona</option>
                   {commonZones.map(z => (
-                    <option key={z.id} value={z.name}>{z.name}</option>
+                    <option key={z.id} value={z.name}>{z.name} (Cap: {z.capacity})</option>
                   ))}
                 </select>
               </FormField>
@@ -743,11 +812,36 @@ export const AdminReservations = () => {
                     name="guestsCount"
                     type="number"
                     min={FIELD_LIMITS.RESERVATION_MIN_ATTENDEES}
-                    max={FIELD_LIMITS.RESERVATION_MAX_ATTENDEES}
+                    max={selectedZone?.capacity ? Number(selectedZone.capacity) : FIELD_LIMITS.RESERVATION_MAX_ATTENDEES}
                     value={formData.guestsCount}
-                    onChange={(e) => setFormData({ ...formData, guestsCount: Number(e.target.value) })}
-                    className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const maxCap = selectedZone?.capacity ? Number(selectedZone.capacity) : FIELD_LIMITS.RESERVATION_MAX_ATTENDEES;
+                      if (val === '') {
+                        setFormData({ ...formData, guestsCount: 0 });
+                        return;
+                      }
+                      const num = Number(val);
+                      if (num > maxCap) {
+                        setFormData({ ...formData, guestsCount: maxCap });
+                        setErrors(prev => ({
+                          ...prev,
+                          attendees: `La capacidad máxima permitida para ${selectedZone?.name || 'esta zona'} es de ${maxCap} personas.`
+                        }));
+                        return;
+                      }
+                      setFormData({ ...formData, guestsCount: num });
+                      if (errors.attendees) setErrors(prev => ({ ...prev, attendees: '' }));
+                    }}
+                    className={`w-full px-3 py-2 text-xs sm:text-sm rounded-xl border bg-white text-slate-900 focus:outline-none focus:ring-2 transition-all ${
+                      errors.attendees ? 'border-rose-400 focus:ring-rose-200' : 'border-slate-200 focus:border-[var(--tenant-primary)] focus:ring-blue-100'
+                    }`}
                   />
+                  {selectedZone?.capacity && (
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Capacidad máxima: <span className="font-semibold text-slate-600">{selectedZone.capacity} personas</span>
+                    </p>
+                  )}
                 </FormField>
               </div>
 
@@ -821,12 +915,13 @@ export const AdminReservations = () => {
                 <select
                   id="admin-res-status"
                   name="status"
-                  value={formData.status}
+                  value={getReservationStatusLabel(formData.status)}
                   onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
                   className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100"
                 >
                   <option value="Confirmada">Confirmada</option>
                   <option value="Pendiente">Pendiente</option>
+                  <option value="Rechazada">Rechazada</option>
                   <option value="Cancelada">Cancelada</option>
                 </select>
               </FormField>

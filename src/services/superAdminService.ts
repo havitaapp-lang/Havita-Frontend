@@ -700,17 +700,14 @@ class SuperAdminService {
 
     const backendResult = result === 'Advertencia' ? 'WARNING' : result === 'Error' ? 'ERROR' : 'SUCCESS';
     apiClient
+      // SEC-9: el servidor fija actor, rol e IP; aquí solo van los datos del evento.
       .post('/audit/events', {
-        actorName: newEvent.actorName,
-        actorEmail: newEvent.actorEmail,
-        actorRole: newEvent.actorRole,
         action,
         resource,
         tenantId: isValidUuid(entityId) ? entityId : null,
         tenantName: tenantName || null,
         result: backendResult,
         details,
-        ipAddress: '127.0.0.1',
       })
       .catch(() => {
         // silent fallback if offline

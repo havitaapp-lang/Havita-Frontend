@@ -28,6 +28,7 @@ export interface Poll {
   totalEligible: number; // e.g. 428 unidades
   participationRate: number; // e.g. 42.7%
   createdAt: string;
+  rawCreatedAt?: string;
   openedAt?: string;
   closedAt?: string;
   durationMinutes?: number;

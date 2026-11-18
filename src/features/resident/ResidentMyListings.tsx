@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Package, Wrench, Pencil, Trash2, X, Clock, CheckCircle,
-  XCircle, EyeOff, AlertCircle, ShoppingBag, Plus,
+  XCircle, Eye, EyeOff, AlertCircle, ShoppingBag, Plus, ShieldAlert, Lock
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { marketplaceService, type UpdateListingDto } from '../../services/marketplaceService';
@@ -12,6 +12,8 @@ import type { MarketplaceListing, ListingStatus } from '../../types';
 import { Button } from '../../components/ui/Button';
 import { SubmitButton } from '../../components/ui/SubmitButton';
 import { Skeleton } from '../../components/ui/Skeleton';
+import { isValidPhone, sanitizePhoneInput } from '../../utils/sanitizers';
+import { VALIDATION_MESSAGES } from '../../validation/messages/es';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -59,8 +61,8 @@ function EditListingModal({
     price: listing.price != null ? String(listing.price) : '',
   });
   
-  // Extract keys from URLs
-  const initialKeys = listing.imageUrls.map(url => url.split('/public/files/')[1] || url);
+  // SEC-9-9: las URLs son firmadas y temporales; las claves llegan aparte en imageKeys.
+  const initialKeys = listing.imageKeys ?? [];
   const [uploadedKeys, setUploadedKeys] = useState<string[]>(initialKeys);
   const [uploadedUrls, setUploadedUrls] = useState<string[]>(listing.imageUrls);
   
@@ -100,7 +102,9 @@ function EditListingModal({
     if (!form.title.trim()) e.title = 'El título es obligatorio';
     if (!form.description.trim()) e.description = 'La descripción es obligatoria';
     if (form.priceType !== 'CONTACT' && !form.price) e.price = 'El precio es obligatorio';
+    else if (form.price && (isNaN(Number(form.price)) || Number(form.price) < 0)) e.price = 'El precio debe ser un número mayor o igual a 0';
     if (!form.contactPhone.trim()) e.contactPhone = 'El teléfono de contacto es obligatorio';
+    else if (!isValidPhone(form.contactPhone)) e.contactPhone = VALIDATION_MESSAGES.INVALID_PHONE;
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -199,10 +203,13 @@ function EditListingModal({
               <input
                 value={form.contactPhone}
                 onChange={(e) => {
-                  setForm(f => ({ ...f, contactPhone: e.target.value }));
+                  setForm(f => ({ ...f, contactPhone: sanitizePhoneInput(e.target.value) }));
                   if (e.target.value) setErrors(err => ({ ...err, contactPhone: '' }));
                 }}
-                maxLength={50}
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                maxLength={20}
                 className={`w-full px-3 py-2 text-sm rounded-xl border bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-100 ${errors.contactPhone ? 'border-red-300' : 'border-slate-200'}`}
               />
               {errors.contactPhone && <p className="text-xs text-red-500 mt-1">{errors.contactPhone}</p>}
@@ -236,18 +243,40 @@ function EditListingModal({
 function ListingItem({
   listing,
   onEdit,
-  onDelete,
+  onHide,
+  onUnhide,
+  onPurge,
+  isUnhiding,
 }: {
   listing: MarketplaceListing;
   onEdit: (l: MarketplaceListing) => void;
-  onDelete: (l: MarketplaceListing) => void;
+  onHide: (l: MarketplaceListing) => void;
+  onUnhide: (l: MarketplaceListing) => void;
+  onPurge: (l: MarketplaceListing) => void;
+  isUnhiding?: boolean;
 }) {
-  const statusConf = STATUS_CONFIG[listing.status];
-  const canEdit = listing.status === 'PUBLISHED' || listing.status === 'PENDING_APPROVAL';
+  const isHidden = listing.status === 'HIDDEN';
+  const isHiddenByAdmin = isHidden && !!listing.hiddenByAdmin;
+  const canEdit = listing.status === 'PUBLISHED' || listing.status === 'PENDING_APPROVAL' || (isHidden && !isHiddenByAdmin);
   const firstImage = listing.imageUrls[0];
 
+  let statusBadge = STATUS_CONFIG[listing.status] ?? STATUS_CONFIG.PUBLISHED;
+  if (isHiddenByAdmin) {
+    statusBadge = {
+      label: 'Suspendida por administración',
+      color: 'bg-rose-50 text-rose-700 border border-rose-200/80',
+      icon: <ShieldAlert className="w-3 h-3 text-rose-600" />
+    };
+  } else if (isHidden) {
+    statusBadge = {
+      label: 'Ocultada por ti',
+      color: 'bg-slate-100 text-slate-600 border border-slate-200/50',
+      icon: <EyeOff className="w-3 h-3 text-slate-500" />
+    };
+  }
+
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden transition-all hover:border-slate-200">
       <div className="flex items-start gap-3 p-4">
         {/* Thumbnail */}
         <div className="w-16 h-16 rounded-xl bg-slate-100 shrink-0 overflow-hidden flex items-center justify-center">
@@ -264,10 +293,10 @@ function ListingItem({
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${statusConf.color}`}>
-                  {statusConf.icon}
-                  {statusConf.label}
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${statusBadge.color}`}>
+                  {statusBadge.icon}
+                  {statusBadge.label}
                 </span>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${listing.type === 'PRODUCT' ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'}`}>
                   {listing.type === 'PRODUCT' ? 'Producto' : 'Servicio'}
@@ -279,37 +308,113 @@ function ListingItem({
                 {formatPrice(listing)}
               </p>
             </div>
+
             {/* Actions */}
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* If hidden by resident: show primary "Hacer visible" button */}
+              {isHidden && !isHiddenByAdmin && (
+                <button
+                  onClick={() => onUnhide(listing)}
+                  disabled={isUnhiding}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white rounded-xl shadow-xs transition-opacity hover:opacity-95 disabled:opacity-50"
+                  style={{ backgroundColor: 'var(--tenant-primary)' }}
+                  title="Hacer visible nuevamente en el marketplace"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Hacer visible</span>
+                </button>
+              )}
+
+              {/* If hidden by admin: show locked indicator */}
+              {isHiddenByAdmin && (
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-rose-600 bg-rose-50 rounded-xl border border-rose-200 cursor-not-allowed"
+                  title="Suspendida por infracción de normas. No puede ser reactivada por el residente."
+                >
+                  <Lock className="w-3 h-3" />
+                  <span className="hidden sm:inline">Bloqueada</span>
+                </span>
+              )}
+
+              {/* Edit button */}
               {canEdit && (
                 <button
                   onClick={() => onEdit(listing)}
-                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
-                  title="Editar"
+                  className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
+                  title="Editar publicación"
                 >
                   <Pencil className="w-3.5 h-3.5" />
                 </button>
               )}
+
+              {/* Hide button if currently active */}
               {listing.status !== 'HIDDEN' && (
                 <button
-                  onClick={() => onDelete(listing)}
-                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
+                  onClick={() => onHide(listing)}
+                  className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
                   title="Ocultar publicación"
                 >
                   <EyeOff className="w-3.5 h-3.5" />
                 </button>
               )}
+
+              {/* Purge / permanent delete button */}
+              <button
+                onClick={() => onPurge(listing)}
+                className="p-1.5 rounded-xl hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors"
+                title="Eliminar definitivamente"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
           <p className="text-[10px] text-slate-400 mt-1.5">
-            {new Date(listing.createdAt).toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: 'numeric' })}
+            Creada el {new Date(listing.createdAt).toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: 'numeric' })}
           </p>
         </div>
       </div>
 
+      {/* Admin Infraction Banner */}
+      {isHiddenByAdmin && (
+        <div className="mx-4 mb-4 p-3.5 bg-rose-50/80 border border-rose-200 rounded-2xl">
+          <div className="flex items-start gap-2.5">
+            <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <div className="text-xs space-y-1">
+              <p className="font-bold text-rose-900">Publicación suspendida por la administración</p>
+              <p className="text-rose-800">
+                <span className="font-semibold">Motivo: </span>
+                {listing.hiddenReason || 'Infracción a las normas de convivencia o reglamento del conjunto.'}
+              </p>
+              <p className="text-[11px] text-rose-600/90 pt-0.5">
+                Esta publicación infringió los lineamientos de la copropiedad y no puede ser reactivada por el residente. Si consideras que se trata de un error, por favor comunícate con la administración.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Self-hidden reminder banner with quick unhide */}
+      {isHidden && !isHiddenByAdmin && (
+        <div className="mx-4 mb-4 p-3 bg-slate-50 border border-slate-200/70 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs text-slate-600">
+            <EyeOff className="w-4 h-4 text-slate-400 shrink-0" />
+            <span>Pausaste esta publicación. Los demás residentes no pueden verla en el marketplace.</span>
+          </div>
+          <button
+            onClick={() => onUnhide(listing)}
+            disabled={isUnhiding}
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white rounded-xl shadow-xs transition-opacity hover:opacity-95 shrink-0 disabled:opacity-50"
+            style={{ backgroundColor: 'var(--tenant-primary)' }}
+          >
+            <Eye className="w-3.5 h-3.5" />
+            Hacer visible
+          </button>
+        </div>
+      )}
+
       {/* Rejection reason */}
       {listing.status === 'REJECTED' && listing.rejectionReason && (
-        <div className="mx-4 mb-4 p-3 bg-red-50 border border-red-100 rounded-xl">
+        <div className="mx-4 mb-4 p-3 bg-red-50 border border-red-100 rounded-2xl">
           <p className="text-xs font-semibold text-red-700 mb-0.5">Motivo del rechazo:</p>
           <p className="text-xs text-red-600">{listing.rejectionReason}</p>
         </div>
@@ -330,13 +435,34 @@ export function ResidentMyListings() {
     queryFn: () => marketplaceService.getMyListings({ size: 100 }),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => marketplaceService.deleteListing(id),
+  const hideMutation = useMutation({
+    mutationFn: (id: string) => marketplaceService.hideListing(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['marketplace'] });
-      notificationService.showToast('Publicación ocultada', 'success');
+      notificationService.showToast('Publicación ocultada temporalmente', 'success');
     },
     onError: () => notificationService.showToast('No se pudo ocultar la publicación', 'error'),
+  });
+
+  const unhideMutation = useMutation({
+    mutationFn: (id: string) => marketplaceService.unhideListing(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['marketplace'] });
+      notificationService.showToast('Publicación visible nuevamente en el marketplace', 'success');
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.message || err?.message || 'No se pudo reactivar la publicación';
+      notificationService.showToast(msg, 'error');
+    },
+  });
+
+  const purgeMutation = useMutation({
+    mutationFn: (id: string) => marketplaceService.purgeListing(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['marketplace'] });
+      notificationService.showToast('Publicación eliminada definitivamente', 'success');
+    },
+    onError: () => notificationService.showToast('No se pudo eliminar la publicación', 'error'),
   });
 
   const allListings = data?.content ?? [];
@@ -351,14 +477,38 @@ export function ResidentMyListings() {
     EXPIRED: allListings.filter(l => l.status === 'EXPIRED').length,
   };
 
-  const handleDelete = async (listing: MarketplaceListing) => {
+  const handleHide = async (listing: MarketplaceListing) => {
     const confirmed = await notificationService.showConfirm(
       'Ocultar publicación',
-      `¿Estás seguro de que quieres ocultar "${listing.title}"? Dejará de ser visible para los demás residentes.`,
+      `¿Deseas pausar u ocultar "${listing.title}"? Dejará de ser visible para los demás residentes, pero podrás reactivarla cuando quieras.`,
       'Sí, ocultar',
       'Cancelar',
     );
-    if (confirmed) deleteMutation.mutate(listing.id);
+    if (confirmed) hideMutation.mutate(listing.id);
+  };
+
+  const handleUnhide = async (listing: MarketplaceListing) => {
+    if (listing.hiddenByAdmin) {
+      notificationService.showToast('Esta publicación fue suspendida por la administración por infringir normas y no puede ser reactivada por el residente.', 'error');
+      return;
+    }
+    const confirmed = await notificationService.showConfirm(
+      'Hacer visible la publicación',
+      `¿Deseas volver a hacer visible "${listing.title}"? Todos los residentes podrán volver a encontrarla en el marketplace.`,
+      'Sí, hacer visible',
+      'Cancelar',
+    );
+    if (confirmed) unhideMutation.mutate(listing.id);
+  };
+
+  const handlePurge = async (listing: MarketplaceListing) => {
+    const confirmed = await notificationService.showConfirm(
+      'Eliminar publicación',
+      `¿Estás seguro de que quieres eliminar definitivamente "${listing.title}"? Esta acción borrará el registro por completo.`,
+      'Sí, eliminar',
+      'Cancelar',
+    );
+    if (confirmed) purgeMutation.mutate(listing.id);
   };
 
   return (
@@ -384,7 +534,7 @@ export function ResidentMyListings() {
             onClick={() => setActiveTab(tab.value)}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl whitespace-nowrap transition-all ${
               activeTab === tab.value
-                ? 'text-white'
+                ? 'text-white shadow-xs'
                 : 'bg-slate-100 text-slate-500 hover:text-slate-700'
             }`}
             style={activeTab === tab.value ? { backgroundColor: 'var(--tenant-primary)' } : {}}
@@ -441,7 +591,10 @@ export function ResidentMyListings() {
               key={listing.id}
               listing={listing}
               onEdit={setEditingListing}
-              onDelete={handleDelete}
+              onHide={handleHide}
+              onUnhide={handleUnhide}
+              onPurge={handlePurge}
+              isUnhiding={unhideMutation.isPending}
             />
           ))}
         </div>

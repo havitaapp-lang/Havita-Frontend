@@ -1,0 +1,70 @@
+PASSED auth.setup.ts:19:3 › authenticate as admin
+PASSED auth.setup.ts:19:3 › authenticate as resident
+PASSED auth.setup.ts:19:3 › authenticate as security
+FAILED residents-create.spec.ts:11:3 › Directorio de residentes · crear · usabilidad › el formulario cabe en una pantalla estándar (1366x860) y sus botones son alcanzables
+PASSED residents-create.spec.ts:29:3 › Directorio de residentes · crear › abre el modal con valores por defecto y se cierra con X y con Cancelar
+PASSED residents-create.spec.ts:51:3 › Directorio de residentes · crear › enviar vacío muestra errores por campo y no llama al backend
+PASSED residents-create.spec.ts:69:3 › Directorio de residentes · crear › rechaza correo con formato inválido y teléfono demasiado corto
+PASSED residents-create.spec.ts:83:3 › Directorio de residentes · crear › rechaza un nombre de un solo carácter (mínimo 2)
+PASSED residents-create.spec.ts:94:3 › Directorio de residentes · crear › aplica longitudes máximas y normaliza la entrada
+PASSED residents-create.spec.ts:113:3 › Directorio de residentes · crear › lista las propiedades del conjunto como casillas seleccionables
+FAILED residents-create.spec.ts:126:3 › Directorio de residentes · crear › registra un residente válido y aparece en el directorio
+FAILED residents-create.spec.ts:155:3 › Directorio de residentes · crear › no permite registrar un correo ya existente y muestra el error del backend
+PASSED residents-delete.spec.ts:11:3 › Directorio de residentes · eliminar › pide confirmación nombrando al residente; cancelar no elimina
+PASSED residents-delete.spec.ts:29:3 › Directorio de residentes · eliminar › confirmar elimina al residente del backend y de la tabla
+FAILED residents-delete.spec.ts:47:3 › Directorio de residentes · eliminar › si el backend rechaza la eliminación no se muestra un mensaje de éxito
+FAILED residents-edit.spec.ts:15:3 › Directorio de residentes · editar › el modal se abre precargado con los datos del residente
+FAILED residents-edit.spec.ts:32:3 › Directorio de residentes · editar › guardar cambios de nombre y teléfono actualiza el residente existente
+FAILED residents-edit.spec.ts:59:3 › Directorio de residentes · editar › cambiar el estado a Inactivo se refleja en el listado
+PASSED residents-edit.spec.ts:74:3 › Directorio de residentes · editar › cancelar la edición no modifica el residente
+PASSED residents-edit.spec.ts:91:3 › Directorio de residentes · editar › la edición valida los campos igual que la creación
+PASSED residents-filters.spec.ts:9:3 › Directorio de residentes · filtro por tipo › ofrece las opciones Todos, Propietarios y Arrendatarios
+FAILED residents-filters.spec.ts:20:3 › Directorio de residentes · filtro por tipo › filtrar por Arrendatarios oculta a los propietarios
+FAILED residents-filters.spec.ts:34:3 › Directorio de residentes · filtro por tipo › filtrar por Propietarios oculta a los arrendatarios
+PASSED residents-invitation-registration.spec.ts:14:3 › Registro por invitación · token inválido (público) › un token inexistente muestra "Invitacion Invalida" y permite volver al login
+PASSED residents-invitation-registration.spec.ts:41:3 › Registro por invitación · token válido › muestra la comunidad y la vivienda de la invitación
+PASSED residents-invitation-registration.spec.ts:53:3 › Registro por invitación · token válido › enviar el formulario vacío muestra todos los errores obligatorios
+PASSED residents-invitation-registration.spec.ts:76:3 › Registro por invitación · token válido › valida formato de correo, longitud de contraseña y aceptación de términos
+PASSED residents-invitation-registration.spec.ts:95:3 › Registro por invitación · token válido › los campos respetan las longitudes máximas
+PASSED residents-invitation-registration.spec.ts:108:3 › Registro por invitación · token válido › el botón de ojo alterna la visibilidad de la contraseña
+PASSED residents-invitation-registration.spec.ts:120:3 › Registro por invitación · token válido › una invitación revocada ya no permite registrarse
+NOTRUN residents-invitation-registration.spec.ts:130:3 › Registro por invitación · token válido › registro completo crea el residente en la vivienda y el token queda consumido
+PASSED residents-list.spec.ts:9:3 › Directorio de residentes · listado › muestra encabezado, columnas y controles
+PASSED residents-list.spec.ts:21:3 › Directorio de residentes · listado › la lista se carga desde GET /api/v1/residents paginado de 8 en 8
+FAILED residents-list.spec.ts:36:3 › Directorio de residentes · listado › una fila muestra nombre, propiedad, tipo, contacto y estado del residente
+FAILED residents-list.spec.ts:53:3 › Directorio de residentes · listado › pagina los resultados y el resumen refleja el total real
+PASSED residents-list.spec.ts:79:3 › Directorio de residentes · listado › estado vacío cuando ningún residente coincide
+PASSED residents-my-home.spec.ts:14:3 › Mi Hogar · estructura › muestra las secciones Personas, Vehículos y Mascotas
+PASSED residents-my-home.spec.ts:38:3 › Mi Hogar · vehículos › la placa se normaliza a mayúsculas sin símbolos y máximo 10 caracteres
+PASSED residents-my-home.spec.ts:50:3 › Mi Hogar · vehículos › no guarda un vehículo sin placa
+FAILED residents-my-home.spec.ts:61:3 › Mi Hogar · vehículos › registra, edita y elimina un vehículo
+PASSED residents-my-home.spec.ts:110:3 › Mi Hogar · mascotas › marcar raza peligrosa muestra el aviso de póliza
+FAILED residents-my-home.spec.ts:122:3 › Mi Hogar · mascotas › registra, edita y elimina una mascota
+PASSED residents-my-home.spec.ts:164:3 › Mi Hogar · invitar personas › genera un enlace de invitación de co-residente y se puede cancelar
+PASSED residents-permissions.spec.ts:14:3 › Residentes · permisos · usuario anónimo › /admin/residents redirige a /login sin sesión
+PASSED residents-permissions.spec.ts:20:3 › Residentes · permisos · usuario anónimo › /resident/my-home redirige a /login sin sesión
+PASSED residents-permissions.spec.ts:25:3 › Residentes · permisos · usuario anónimo › API GET /residents rechaza peticiones sin token
+PASSED residents-permissions.spec.ts:32:3 › Residentes · permisos · usuario anónimo › API /resident/me/people rechaza peticiones sin token
+PASSED residents-permissions.spec.ts:43:3 › Residentes · permisos · rol RESIDENT › no puede abrir el directorio de administración
+PASSED residents-permissions.spec.ts:49:3 › Residentes · permisos · rol RESIDENT › API: no puede listar, crear ni eliminar residentes del censo
+PASSED residents-permissions.spec.ts:68:3 › Residentes · permisos · rol RESIDENT › API: no puede generar invitaciones de administrador
+PASSED residents-permissions.spec.ts:82:3 › Residentes · permisos · rol SECURITY › no puede abrir el directorio de administración
+PASSED residents-permissions.spec.ts:88:3 › Residentes · permisos · rol SECURITY › API: puede consultar el censo pero no modificarlo
+PASSED residents-permissions.spec.ts:102:3 › Residentes · permisos · rol COMMUNITY_ADMIN › accede al directorio desde el menú lateral
+PASSED residents-permissions.spec.ts:109:3 › Residentes · permisos · rol COMMUNITY_ADMIN › acceso directo por URL a /admin/residents
+PASSED residents-permissions.spec.ts:115:3 › Residentes · permisos · rol COMMUNITY_ADMIN › no puede abrir el portal del residente
+PASSED residents-permissions.spec.ts:120:3 › Residentes · permisos · rol COMMUNITY_ADMIN › API: un residente inexistente responde 404
+PASSED residents-permissions.spec.ts:125:3 › Residentes · permisos · rol COMMUNITY_ADMIN › API: no se pueden leer residentes de otro tenant enviando un X-Tenant-ID ajeno
+PASSED residents-permissions.spec.ts:137:3 › Residentes · permisos · rol COMMUNITY_ADMIN › API: assignProperties no acepta un userId inexistente
+PASSED residents-property-invitations.spec.ts:23:3 › Propiedades · invitación individual de residente › genera una invitación pendiente con QR y enlace, y la revoca
+FAILED residents-property-invitations.spec.ts:53:3 › Propiedades · invitación individual de residente › reabrir el modal muestra la invitación pendiente existente
+PASSED residents-property-invitations.spec.ts:67:3 › Propiedades · invitación individual de residente › una propiedad ocupada no permite generar invitación y se informa el motivo
+PASSED residents-property-invitations.spec.ts:83:3 › Propiedades · asignar residente existente › busca un residente y lo vincula a la propiedad
+PASSED residents-property-invitations.spec.ts:113:3 › Propiedades · invitación múltiple › selecciona propiedades vacantes y genera un único enlace
+PASSED residents-search.spec.ts:10:3 › Directorio de residentes · búsqueda › busca por nombre sin distinguir mayúsculas
+PASSED residents-search.spec.ts:20:3 › Directorio de residentes · búsqueda › busca por correo electrónico
+PASSED residents-search.spec.ts:30:3 › Directorio de residentes · búsqueda › busca por teléfono
+FAILED residents-search.spec.ts:39:3 › Directorio de residentes · búsqueda › busca por número de apartamento, como anuncia el placeholder
+PASSED residents-search.spec.ts:48:3 › Directorio de residentes · búsqueda › limpiar la búsqueda vuelve al listado completo y a la página 1
+PASSED residents-search.spec.ts:66:3 › Directorio de residentes · búsqueda (límites) › el campo de búsqueda limita la entrada a 100 caracteres
+PASSED residents-search.spec.ts:74:3 › Directorio de residentes · búsqueda (límites) › caracteres especiales en la búsqueda no rompen la consulta

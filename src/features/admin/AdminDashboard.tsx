@@ -169,7 +169,7 @@ export const AdminDashboard = () => {
           </div>
 
           <Link
-            to={`/admin/asambleas/${livePoll.assemblyId}`}
+            to={`/admin/assemblies/${livePoll.assemblyId}`}
             className="px-4 py-2.5 bg-white hover:bg-red-50 text-red-700 font-bold rounded-2xl text-xs flex items-center gap-1.5 shadow-md transition-all whitespace-nowrap self-start sm:self-auto cursor-pointer"
           >
             Ver Encuesta en Vivo
@@ -183,7 +183,7 @@ export const AdminDashboard = () => {
             <span className="font-medium text-slate-700">No hay encuestas activas en este momento.</span>
           </div>
           <Link
-            to="/admin/asambleas"
+            to="/admin/assemblies"
             className="font-bold text-[var(--tenant-primary)] hover:underline flex items-center gap-1 self-start sm:self-auto"
           >
             Gestionar Asambleas y Votaciones →
@@ -206,14 +206,14 @@ export const AdminDashboard = () => {
 
           <div className="flex items-center gap-3 text-xs">
             <Link
-              to="/admin/turnos"
+              to="/admin/shifts"
               className="font-bold text-[var(--tenant-primary)] hover:underline flex items-center gap-1"
             >
               Gestionar Turnos →
             </Link>
             <span className="text-slate-300">|</span>
             <Link
-              to="/admin/asistencia"
+              to="/admin/attendance"
               className="font-bold text-slate-700 hover:underline flex items-center gap-1"
             >
               Ver Asistencia →
@@ -292,7 +292,7 @@ export const AdminDashboard = () => {
                     </div>
 
                     <Link
-                      to="/admin/turnos"
+                      to="/admin/shifts"
                       className={`px-3 py-1.5 rounded-xl font-bold text-[11px] shrink-0 whitespace-nowrap shadow-2xs transition-all ${
                         isCritical
                           ? 'bg-rose-600 hover:bg-rose-700 text-white'

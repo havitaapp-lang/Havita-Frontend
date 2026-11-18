@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTenant } from '../../contexts/TenantContext';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
-import { Building2, ShieldCheck, User, Eye, EyeOff, Lock, Mail, MapPin, Package, Wrench, Calendar, AlertCircle } from 'lucide-react';
+import { 
+  Building2, ShieldCheck, User, Eye, EyeOff, Lock, 
+  Mail, MapPin, AlertCircle, ArrowRight, MessageCircle, 
+  Sparkles, CheckCircle2, Smartphone, Volume2
+} from 'lucide-react';
 import { loginSchema } from '../../validation/schemas/loginSchema';
 import { validateForm } from '../../validation/validators/formValidator';
 import { FormErrorSummary } from '../../components/ui/FormErrorSummary';
@@ -11,51 +14,46 @@ import { FormField } from '../../components/ui/FormField';
 import { SubmitButton } from '../../components/ui/SubmitButton';
 import { notificationService } from '../../services/notificationService';
 import { normalizeEmail, sanitizeEmailInput } from '../../utils/sanitizers';
+import { consumeReturnTo } from './returnTo';
 import { FIELD_LIMITS } from '../../validation/rules/limits';
+import { Logo } from '../../components/Logo';
+import { InstallAppButton } from '../pwa/InstallAppButton';
 
 export const LoginPage = () => {
-  const { login, loginAs } = useAuth();
+  const { login } = useAuth();
   const { currentTenant, availableTenants, setCurrentTenant } = useTenant();
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Remember me persistence
+  const [rememberMe, setRememberMe] = useState(() => {
+    return localStorage.getItem('havita_remember_me') === 'true';
+  });
+
   const [formData, setFormData] = useState({
-    email: '',
+    email: localStorage.getItem('havita_remember_email') || '',
     password: '',
   });
+
   const [showPassword, setShowPassword] = useState(false);
+  const [capsLockActive, setCapsLockActive] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [errorList, setErrorList] = useState<Array<{ field: string; message: string }>>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+
   const isRevoked = (location.state as { reason?: string } | null)?.reason === 'access_revoked';
   const isPasswordChanged = (location.state as { reason?: string } | null)?.reason === 'password_changed';
 
-  const handleDemoLogin = async (role: 'COMMUNITY_ADMIN' | 'SECURITY' | 'RESIDENT') => {
-    setIsSubmitting(true);
-    try {
-      const activeTenant = currentTenant || (availableTenants.length > 0 ? availableTenants[0] : null);
-      if (!activeTenant) {
-        notificationService.showError('Error', 'No hay comunidades disponibles para iniciar sesión.');
-        return;
-      }
-      await loginAs(role, activeTenant.id, activeTenant.subdomain || activeTenant.slug);
-      notificationService.showToast(`Sesión iniciada como ${role} en ${activeTenant.name}`, 'success');
-
-      if (role === 'COMMUNITY_ADMIN') navigate('/admin');
-      if (role === 'SECURITY') navigate('/security');
-      if (role === 'RESIDENT') navigate('/resident');
-    } catch {
-      notificationService.showError('Error', 'No se pudo iniciar sesión con perfil de demostración');
-    } finally {
-      setIsSubmitting(false);
+  const handlePasswordKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.getModifierState) {
+      setCapsLockActive(e.getModifierState('CapsLock'));
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Normalizar email antes de validar
     const cleanedData = {
       email: normalizeEmail(formData.email),
       password: formData.password,
@@ -79,6 +77,15 @@ export const LoginPage = () => {
       const tenantId = activeTenant ? activeTenant.id : undefined;
       const logged = await login(cleanedData.email, cleanedData.password, tenantId);
 
+      // Save or remove remember me
+      if (rememberMe) {
+        localStorage.setItem('havita_remember_me', 'true');
+        localStorage.setItem('havita_remember_email', cleanedData.email);
+      } else {
+        localStorage.removeItem('havita_remember_me');
+        localStorage.removeItem('havita_remember_email');
+      }
+
       if (activeTenant) {
         notificationService.showToast(`Bienvenido ${logged.name} a ${activeTenant.name}`, 'success');
       } else {
@@ -90,7 +97,8 @@ export const LoginPage = () => {
       } else if (logged.role === 'SECURITY') {
         navigate('/security');
       } else if (logged.role === 'RESIDENT') {
-        navigate('/resident');
+        // P8-B: si llegó desde un aviso de llamada con la sesión vencida, vuelve a esa llamada.
+        navigate(consumeReturnTo(logged.role) ?? '/resident');
       } else {
         navigate('/admin');
       }
@@ -103,98 +111,153 @@ export const LoginPage = () => {
     }
   };
 
-  const primaryColor = currentTenant?.primaryColor || '#dc2626'; // Default red to match design if none set
-  const themeStyle = { '--theme-color': primaryColor, '--theme-light': `${primaryColor}15` } as React.CSSProperties;
+  // Corporate brand primary or tenant primary
+  const primaryColor = currentTenant?.primaryColor || '#16345F';
+  const tenantDisplayName = currentTenant?.name || 'Havita';
+  const tenantDisplayAddress = currentTenant?.address 
+    ? `${currentTenant.address} • ${currentTenant.city || 'Colombia'}` 
+    : 'Portal Residencial de Propiedad Horizontal';
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col md:flex-row items-center justify-center py-2 md:py-4 lg:py-8 px-4 sm:px-6 lg:px-8 font-sans bg-cover bg-center bg-no-repeat bg-fixed relative" style={{ backgroundImage: "url('/bg-login.jpg')", ...themeStyle }}>
+    <div className="min-h-screen w-full flex flex-col lg:flex-row bg-[#0B192C] lg:bg-slate-50 font-sans selection:bg-blue-600 selection:text-white">
       
-      {/* Light overlay for readability */}
-      <div className="absolute inset-0 bg-white/70 md:bg-gradient-to-r md:from-white/95 md:via-white/80 md:to-transparent backdrop-blur-sm md:backdrop-blur-none pointer-events-none" />
-
-      <div className="w-full max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 md:gap-8 lg:gap-16 relative z-10">
+      {/* ================= LEFT COLUMN: Atmospheric Brand Experience (Desktop Only) ================= */}
+      <div className="hidden lg:flex lg:w-1/2 xl:w-7/12 bg-gradient-to-br from-[#0B192C] via-[#0F172A] to-[#16345F] p-10 xl:p-16 flex-col justify-between relative overflow-hidden text-white select-none">
         
-        {/* Left side (Desktop only) */}
-        <div className="hidden md:block w-full md:w-1/2 pr-2 lg:pr-12">
-          <div className="w-10 h-10 lg:w-16 lg:h-16 rounded-[0.8rem] lg:rounded-2xl flex items-center justify-center shadow-lg text-white font-black text-lg lg:text-2xl mb-4 lg:mb-6 bg-[var(--theme-color)]">
-            {currentTenant?.logo || 'AU'}
+        {/* Soft Ambient Radial Lights */}
+        <div className="absolute -top-24 -left-24 w-96 h-96 bg-blue-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 right-0 w-96 h-96 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+
+        {/* Top: Logo & Portal Tag */}
+        <div className="relative z-10 flex items-center gap-3">
+          <Link to="/" className="inline-flex items-center gap-2.5 hover:opacity-95 transition-opacity">
+            <Logo size="md" className="brightness-0 invert" />
+          </Link>
+          <div className="h-4 w-px bg-slate-700/80 mx-1" />
+          <span className="text-xs font-semibold text-slate-300 tracking-wide uppercase">
+            Portal Residencial
+          </span>
+        </div>
+
+        {/* Middle: Brand Pitch & Live Community Glassmorphism Card */}
+        <div className="relative z-10 max-w-lg my-auto py-8">
+          
+          {/* Verified Community Pill */}
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-semibold mb-6 backdrop-blur-sm">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>{currentTenant?.name ? `Comunidad: ${currentTenant.name}` : 'Conexión Segura Multicopropiedad'}</span>
           </div>
-          <h1 className="text-3xl lg:text-5xl font-black text-slate-900 leading-tight mb-1 lg:mb-3">
-            {currentTenant?.name || 'App Unidades'}
+
+          <h1 className="text-3xl xl:text-4xl font-black text-white leading-tight mb-4 tracking-tight">
+            Tu comunidad residencial, más simple, segura y conectada.
           </h1>
-          <p className="text-slate-700 flex items-center gap-1.5 font-medium mb-4 lg:mb-6 text-[13px] lg:text-base">
-            <MapPin className="w-3.5 h-3.5 lg:w-4 lg:h-4" /> {currentTenant?.address ? `${currentTenant.address} • ${currentTenant.city}` : 'Colombia'}
-          </p>
-          <div className="w-8 lg:w-12 h-1 lg:h-1.5 rounded-full mb-4 lg:mb-6 bg-[var(--theme-color)]"></div>
-          <p className="text-slate-700 lg:text-slate-600 text-[14px] lg:text-lg mb-6 lg:mb-10 leading-relaxed max-w-md font-medium">
-            Tu portal residencial, más simple, seguro y conectado.
+
+          <p className="text-sm xl:text-base text-slate-300 leading-relaxed mb-8 font-normal">
+            Ingresa para gestionar visitas con código QR, responder citofonía virtual WebRTC en la nube y participar en asambleas bajo la Ley 675.
           </p>
 
-          <div className="space-y-3 lg:space-y-6">
-            <div className="flex items-center gap-3 lg:gap-5">
-              <div className="w-10 h-10 lg:w-14 lg:h-14 rounded-xl lg:rounded-[1.25rem] flex items-center justify-center shrink-0 bg-[var(--theme-light)] text-[var(--theme-color)] shadow-sm">
-                <Package className="w-5 h-5 lg:w-6 lg:h-6" />
+          {/* Interactive Community Status Glass Box */}
+          <div className="rounded-3xl bg-white/5 border border-white/10 p-5 xl:p-6 backdrop-blur-md shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3.5">
+              <div className="flex items-center gap-3">
+                <div 
+                  className="w-10 h-10 rounded-2xl flex items-center justify-center font-black text-sm text-white shadow-inner"
+                  style={{ backgroundColor: primaryColor }}
+                >
+                  {currentTenant?.logo || 'HV'}
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-white truncate max-w-[220px]">
+                    {tenantDisplayName}
+                  </div>
+                  <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
+                    <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                    <span className="truncate max-w-[220px]">{tenantDisplayAddress}</span>
+                  </div>
+                </div>
               </div>
-              <div>
-                <h3 className="font-bold text-slate-900 text-[13px] lg:text-[15px]">Gestiona tus paquetes</h3>
-                <p className="text-[11px] lg:text-sm text-slate-600 mt-0.5">Recibe y revisa tus entregas.</p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-3 lg:gap-5">
-              <div className="w-10 h-10 lg:w-14 lg:h-14 rounded-xl lg:rounded-[1.25rem] flex items-center justify-center shrink-0 bg-[var(--theme-light)] text-[var(--theme-color)] shadow-sm">
-                <User className="w-5 h-5 lg:w-6 lg:h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-slate-900 text-[13px] lg:text-[15px]">Autoriza visitas</h3>
-                <p className="text-[11px] lg:text-sm text-slate-600 mt-0.5">Desde cualquier lugar.</p>
-              </div>
+
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 bg-emerald-500/15 px-2.5 py-1 rounded-full border border-emerald-500/30 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Operando
+              </span>
             </div>
 
-            <div className="flex items-center gap-3 lg:gap-5">
-              <div className="w-10 h-10 lg:w-14 lg:h-14 rounded-xl lg:rounded-[1.25rem] flex items-center justify-center shrink-0 bg-[var(--theme-light)] text-[var(--theme-color)] shadow-sm">
-                <Wrench className="w-5 h-5 lg:w-6 lg:h-6" />
+            {/* 3 Live Feature Status Micro-Pills */}
+            <div className="grid grid-cols-3 gap-2.5 pt-1 text-center">
+              <div className="bg-white/5 border border-white/5 rounded-2xl p-2.5">
+                <div className="text-[10px] text-slate-400 font-medium">Citofonía</div>
+                <div className="text-xs font-bold text-emerald-300 mt-0.5 flex items-center justify-center gap-1">
+                  <Volume2 className="w-3 h-3" />
+                  <span>WebRTC</span>
+                </div>
               </div>
-              <div>
-                <h3 className="font-bold text-slate-900 text-[13px] lg:text-[15px]">Reporta daños</h3>
-                <p className="text-[11px] lg:text-sm text-slate-600 mt-0.5">Mantén tu hogar en perfecto estado.</p>
+              <div className="bg-white/5 border border-white/5 rounded-2xl p-2.5">
+                <div className="text-[10px] text-slate-400 font-medium">Accesos</div>
+                <div className="text-xs font-bold text-blue-300 mt-0.5">Pases QR</div>
+              </div>
+              <div className="bg-white/5 border border-white/5 rounded-2xl p-2.5">
+                <div className="text-[10px] text-slate-400 font-medium">Seguridad</div>
+                <div className="text-xs font-bold text-cyan-300 mt-0.5">Ley 675 / 1581</div>
               </div>
             </div>
+          </div>
 
-            <div className="flex items-center gap-3 lg:gap-5">
-              <div className="w-10 h-10 lg:w-14 lg:h-14 rounded-xl lg:rounded-[1.25rem] flex items-center justify-center shrink-0 bg-[var(--theme-light)] text-[var(--theme-color)] shadow-sm">
-                <Calendar className="w-5 h-5 lg:w-6 lg:h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-slate-900 text-[13px] lg:text-[15px]">Reserva zonas comunes</h3>
-                <p className="text-[11px] lg:text-sm text-slate-600 mt-0.5">De forma rápida y sencilla.</p>
-              </div>
-            </div>
+        </div>
+
+        {/* Bottom: Silent Security Seals */}
+        <div className="relative z-10 flex items-center gap-6 text-xs text-slate-400 pt-6 border-t border-slate-800/80">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span>Cifrado SSL de 256 bits</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-blue-400" />
+            <span>Aislamiento por Copropiedad</span>
           </div>
         </div>
 
-        {/* Mobile Header (Hidden on Desktop) */}
-        <div className="md:hidden flex flex-col items-center justify-center text-center w-full mb-2">
-          <div className="w-16 h-16 rounded-[1.25rem] flex items-center justify-center shadow-lg text-white font-black text-2xl mb-4 bg-[var(--theme-color)]">
-            {currentTenant?.logo || 'AU'}
-          </div>
-          <h1 className="text-3xl font-black text-slate-900 leading-tight mb-2 drop-shadow-sm px-2">
-            {currentTenant?.name || 'App Unidades'}
-          </h1>
-          <p className="text-slate-800 flex items-center justify-center gap-1.5 font-bold bg-white/60 backdrop-blur-md px-4 py-1.5 rounded-full text-xs shadow-sm">
-            <MapPin className="w-3.5 h-3.5" /> {currentTenant?.address ? `${currentTenant.address} • ${currentTenant.city}` : 'Colombia'}
-          </p>
+      </div>
 
+      {/* ================= RIGHT COLUMN: High-Fidelity Clean Authentication ================= */}
+      <div className="w-full lg:w-1/2 xl:w-5/12 flex flex-col justify-center items-center p-4 sm:p-8 lg:p-12 xl:p-14 bg-slate-100 lg:bg-white min-h-screen">
+        
+        <div className="w-full max-w-[440px] mx-auto bg-white lg:bg-transparent rounded-3xl lg:rounded-none p-6 sm:p-8 lg:p-0 shadow-xl lg:shadow-none border border-slate-200/80 lg:border-none">
+          
+          {/* Mobile Only Header */}
+          <div className="lg:hidden flex flex-col items-center text-center mb-6">
+            <Link to="/" className="inline-flex items-center gap-2 mb-3">
+              <Logo size="md" />
+            </Link>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold mb-2">
+              <Building2 className="w-3.5 h-3.5 text-blue-600" />
+              <span>{tenantDisplayName}</span>
+            </div>
+          </div>
+
+          {/* Form Header */}
+          <div className="mb-6 lg:mb-8 text-left">
+            <h2 className="text-2xl sm:text-3xl font-black text-[#16345F] tracking-tight">
+              Iniciar Sesión
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1.5">
+              Ingresa tus credenciales autorizadas para acceder al portal.
+            </p>
+          </div>
+
+          {/* Tenant Switcher (If multiple available in evaluation mode) */}
           {availableTenants.length > 1 && (
-            <div className="mt-4 inline-flex items-center gap-1.5 px-4 py-1.5 bg-white/90 backdrop-blur-md border border-slate-200 rounded-full text-xs text-slate-800 shadow-md">
-              <span className="w-2.5 h-2.5 rounded-full bg-[var(--theme-color)] shadow-sm" />
+            <div className="mb-5 p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Building2 className="w-4 h-4 text-slate-500 shrink-0" />
+                <span className="text-xs text-slate-500 font-medium truncate">Copropiedad:</span>
+              </div>
               <select
                 value={currentTenant?.id || availableTenants[0].id}
                 onChange={(e) => {
                   const sel = availableTenants.find((t) => t.id === e.target.value);
                   if (sel) setCurrentTenant(sel);
                 }}
-                className="bg-transparent border-none outline-none cursor-pointer font-bold text-slate-900"
+                className="bg-transparent border-none outline-none cursor-pointer font-bold text-xs text-[#16345F] text-right"
               >
                 {availableTenants.map((t) => (
                   <option key={t.id} value={t.id}>
@@ -204,207 +267,187 @@ export const LoginPage = () => {
               </select>
             </div>
           )}
-        </div>
 
-        {/* Right Card (Form) */}
-        <div className="w-full max-w-[480px] md:max-w-[400px] lg:max-w-[480px] mx-auto md:mx-0 shrink-0">
-          <Card className="border-0 shadow-2xl rounded-[1.5rem] lg:rounded-[2rem] bg-white overflow-hidden p-2 sm:p-4 lg:p-6">
-            
-            {/* Desktop only: Logo and title inside card */}
-            {/* En laptops pequeñas, ocultamos esto de la tarjeta para ahorrar 150px de altura, ya que ya se ve en la columna izquierda. Solo se muestra en monitores grandes lg: */}
-            <div className="hidden lg:block text-center pt-2 pb-4 px-8">
-              <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center text-white font-black text-xl mb-4 shadow-sm bg-[var(--theme-color)]">
-                {currentTenant?.logo || 'AU'}
+          {/* Special State Alerts */}
+          {isRevoked && (
+            <div className="mb-5 p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs flex items-center gap-3 animate-in fade-in">
+              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+              <div>
+                <span className="font-bold block">Acceso Revocado</span>
+                <span>Tu relación con esta copropiedad ha sido finalizada. Tu sesión se cerró automáticamente.</span>
               </div>
-              <h2 className="text-2xl font-black text-slate-900">{currentTenant?.name || 'App Unidades'}</h2>
-              <p className="text-xs text-slate-500 flex items-center justify-center gap-1 mt-2 font-medium">
-                <MapPin className="w-3.5 h-3.5" /> {currentTenant?.address ? `${currentTenant.address} • ${currentTenant.city}` : 'Colombia'}
-              </p>
-              <div className="w-full h-px bg-slate-100 mt-6"></div>
+            </div>
+          )}
+
+          {isPasswordChanged && (
+            <div className="mb-5 p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-900 text-xs flex items-center gap-3 animate-in fade-in">
+              <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+              <div>
+                <span className="font-bold block">Contraseña actualizada</span>
+                <span>Tu contraseña fue cambiada exitosamente. Por favor inicia sesión nuevamente.</span>
+              </div>
+            </div>
+          )}
+
+          {authError && (
+            <div className="mb-5 p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-rose-800 text-xs flex items-center gap-2.5 animate-in fade-in">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+              <div>
+                <span className="font-bold block">Error de autenticación</span>
+                <span>{authError}</span>
+              </div>
+            </div>
+          )}
+
+          <FormErrorSummary errors={errorList} />
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} noValidate className="space-y-4 sm:space-y-5">
+            
+            {/* Email Field */}
+            <FormField
+              id="email"
+              label="Correo electrónico"
+              required
+              error={errors.email}
+            >
+              <div className="relative">
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="email"
+                  name="email"
+                  type="email"
+                  autoComplete="username email"
+                  inputMode="email"
+                  maxLength={FIELD_LIMITS.EMAIL_MAX_LENGTH}
+                  value={formData.email}
+                  onChange={(e) => {
+                    setFormData({ ...formData, email: sanitizeEmailInput(e.target.value) });
+                    if (errors.email) setErrors({ ...errors, email: '' });
+                    if (authError) setAuthError(null);
+                  }}
+                  placeholder="ejemplo@micopropiedad.com"
+                  aria-invalid={Boolean(errors.email)}
+                  className={`w-full h-12 pl-10 pr-4 text-sm rounded-xl border bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-4 transition-all ${
+                    errors.email
+                      ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-500/10'
+                      : 'border-slate-200 focus:border-[#16345F] focus:ring-[#16345F]/10'
+                  }`}
+                />
+              </div>
+            </FormField>
+
+            {/* Password Field */}
+            <FormField
+              id="password"
+              label="Contraseña"
+              required
+              error={errors.password}
+            >
+              <div className="relative">
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="password"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  maxLength={FIELD_LIMITS.PASSWORD_MAX_LENGTH}
+                  value={formData.password}
+                  onKeyDown={handlePasswordKeyDown}
+                  onKeyUp={handlePasswordKeyDown}
+                  onChange={(e) => {
+                    setFormData({ ...formData, password: e.target.value });
+                    if (errors.password) setErrors({ ...errors, password: '' });
+                    if (authError) setAuthError(null);
+                  }}
+                  placeholder="••••••••"
+                  aria-invalid={Boolean(errors.password)}
+                  className={`w-full h-12 pl-10 pr-11 text-sm rounded-xl border bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-4 transition-all ${
+                    errors.password
+                      ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-500/10'
+                      : 'border-slate-200 focus:border-[#16345F] focus:ring-[#16345F]/10'
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Ocultar contraseña' : 'Ver contraseña'}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none p-1"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+
+              {/* CapsLock Warning Badge */}
+              {capsLockActive && (
+                <div className="flex items-center gap-1.5 text-[11px] text-amber-700 font-semibold mt-1.5 animate-in fade-in">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>Bloqueo de Mayúsculas (Caps Lock) está activado</span>
+                </div>
+              )}
+            </FormField>
+
+            {/* Remember Me & Forgot Password Row */}
+            <div className="flex items-center justify-between pt-1 pb-1">
+              <label className="flex items-center gap-2 cursor-pointer select-none group">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-[#16345F] focus:ring-[#16345F]/20 cursor-pointer accent-[#16345F]"
+                />
+                <span className="text-xs font-semibold text-slate-600 group-hover:text-slate-900 transition-colors">
+                  Recordarme
+                </span>
+              </label>
+
+              <button 
+                type="button" 
+                onClick={() => navigate('/forgot-password')} 
+                className="text-xs font-bold text-[#16345F] hover:text-blue-700 hover:underline transition-colors"
+              >
+                ¿Olvidaste tu contraseña?
+              </button>
             </div>
 
-            <CardHeader className="pt-4 lg:pt-0 pb-4 lg:pb-6 px-4 sm:px-6 lg:px-2">
-              <CardTitle className="text-xl lg:text-2xl font-black text-slate-900">Iniciar Sesión</CardTitle>
-              <CardDescription className="text-xs lg:text-[13px] text-slate-500 mt-1 font-medium">
-                Ingresa tus credenciales autorizadas para acceder al portal.
-              </CardDescription>
-            </CardHeader>
+            {/* Submit Button */}
+            <SubmitButton
+              isSubmitting={isSubmitting}
+              loadingText="Verificando credenciales..."
+              className="w-full h-12 rounded-xl text-sm font-bold shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all text-white flex justify-center items-center gap-2 bg-[#16345F] hover:bg-blue-700 active:bg-blue-800 border-none cursor-pointer"
+            >
+              <span>Ingresar al Sistema</span>
+              <ArrowRight className="w-4 h-4" />
+            </SubmitButton>
+          </form>
 
-            <CardContent className="px-4 sm:px-6 lg:px-2 pb-2 space-y-4 lg:space-y-6">
-              {isRevoked && (
-                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs flex items-center gap-3 animate-in fade-in">
-                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
-                  <div>
-                    <span className="font-bold block">Acceso Revocado</span>
-                    <span>Tu relación con esta copropiedad ha sido finalizada por el propietario. Tu sesión se cerró automáticamente.</span>
-                  </div>
-                </div>
-              )}
+          {/* Instalar la app (solo móviles y tablets, nunca dentro de la app instalada) */}
+          <InstallAppButton className="mt-3" />
 
-              {isPasswordChanged && (
-                <div className="p-3.5 bg-green-50 border border-green-200 rounded-2xl text-green-900 text-xs flex items-center gap-3 animate-in fade-in">
-                  <ShieldCheck className="w-5 h-5 text-green-600 shrink-0" />
-                  <div>
-                    <span className="font-bold block">Contraseña actualizada</span>
-                    <span>Tu contraseña fue cambiada exitosamente. Por favor inicia sesión nuevamente.</span>
-                  </div>
-                </div>
-              )}
+          {/* Support and Trust Footer */}
+          <div className="pt-6 mt-6 border-t border-slate-100 text-center space-y-2.5">
+            <p className="text-xs text-slate-500">
+              ¿Problemas para acceder a tu unidad?{' '}
+              <a
+                href="https://wa.me/573001234567?text=Hola%2C%20tengo%20problemas%20para%20ingresar%20a%20mi%20cuenta%20en%20Havita."
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-bold text-emerald-600 hover:text-emerald-700 hover:underline inline-flex items-center gap-1"
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                Soporte por WhatsApp
+              </a>
+            </p>
+            <div className="text-[11px] text-slate-400 flex items-center justify-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Conexión segura SSL · Protección de datos Ley 1581</span>
+            </div>
+          </div>
 
-              {authError && (
-                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-rose-800 text-xs flex items-center gap-2.5 animate-in fade-in">
-                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
-                  <div>
-                    <span className="font-bold block">Acceso Denegado</span>
-                    <span>{authError}</span>
-                  </div>
-                </div>
-              )}
-
-              <FormErrorSummary errors={errorList} />
-
-              <form onSubmit={handleSubmit} noValidate className="space-y-4 lg:space-y-6">
-                <FormField
-                  id="email"
-                  label="Correo electrónico"
-                  required
-                  error={errors.email}
-                >
-                  <div className="relative">
-                    <Mail className="w-4 h-4 lg:w-5 lg:h-5 text-slate-400 absolute left-3.5 lg:left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      id="email"
-                      name="email"
-                      type="email"
-                      autoComplete="email"
-                      maxLength={FIELD_LIMITS.EMAIL_MAX_LENGTH}
-                      value={formData.email}
-                      onChange={(e) => {
-                        setFormData({ ...formData, email: sanitizeEmailInput(e.target.value) });
-                        if (errors.email) setErrors({ ...errors, email: '' });
-                        if (authError) setAuthError(null);
-                      }}
-                      placeholder="ejemplo@condominio.com"
-                      aria-invalid={Boolean(errors.email)}
-                      className={`w-full pl-10 lg:pl-11 pr-4 py-2.5 lg:py-3 text-sm rounded-xl border bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all ${
-                        errors.email
-                          ? 'border-rose-400 focus:ring-rose-200'
-                          : 'border-slate-200 focus:border-[var(--theme-color)] focus:ring-[var(--theme-color)]/20'
-                      }`}
-                    />
-                  </div>
-                </FormField>
-
-                <FormField
-                  id="password"
-                  label="Contraseña"
-                  required
-                  error={errors.password}
-                >
-                  <div className="relative">
-                    <Lock className="w-4 h-4 lg:w-5 lg:h-5 text-slate-400 absolute left-3.5 lg:left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      id="password"
-                      name="password"
-                      type={showPassword ? 'text' : 'password'}
-                      autoComplete="current-password"
-                      maxLength={FIELD_LIMITS.PASSWORD_MAX_LENGTH}
-                      value={formData.password}
-                      onChange={(e) => {
-                        setFormData({ ...formData, password: e.target.value });
-                        if (errors.password) setErrors({ ...errors, password: '' });
-                        if (authError) setAuthError(null);
-                      }}
-                      placeholder="••••••••"
-                      aria-invalid={Boolean(errors.password)}
-                      className={`w-full pl-10 lg:pl-11 pr-11 py-2.5 lg:py-3 text-sm rounded-xl border bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all ${
-                        errors.password
-                          ? 'border-rose-400 focus:ring-rose-200'
-                          : 'border-slate-200 focus:border-[var(--theme-color)] focus:ring-[var(--theme-color)]/20'
-                      }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      aria-label={showPassword ? 'Ocultar contraseña' : 'Ver contraseña'}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4 lg:w-5 lg:h-5" /> : <Eye className="w-4 h-4 lg:w-5 lg:h-5" />}
-                    </button>
-                  </div>
-                </FormField>
-
-                <div className="flex items-center justify-between pt-0 lg:pt-1 pb-1 lg:pb-2">
-                  <label className="flex items-center gap-2 lg:gap-2.5 cursor-pointer group">
-                    <div className="relative flex items-center justify-center w-4 h-4 lg:w-5 lg:h-5 rounded-[4px] border-2 transition-colors border-[var(--theme-color)] bg-[var(--theme-color)]">
-                      <svg className="w-3 h-3 lg:w-3.5 lg:h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                    </div>
-                    <span className="text-xs lg:text-sm font-semibold text-slate-700 group-hover:text-slate-900 transition-colors">Recordarme</span>
-                  </label>
-                  <a href="#" className="text-xs lg:text-sm font-bold hover:underline text-[var(--theme-color)]">
-                    ¿Olvidaste tu contraseña?
-                  </a>
-                </div>
-
-                <SubmitButton
-                  isSubmitting={isSubmitting}
-                  loadingText="Validando..."
-                  className="w-full py-2.5 lg:py-3.5 rounded-xl text-sm lg:text-[15px] font-bold shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all text-white flex justify-center items-center gap-2 bg-[var(--theme-color)] border-none"
-                >
-                  Ingresar al Sistema <span className="font-bold text-base lg:text-lg leading-none">→</span>
-                </SubmitButton>
-              </form>
-
-              {/* Acceso seguro badge (Desktop only inside card) */}
-              <div className="hidden lg:flex mt-8 p-4 rounded-2xl items-center gap-4 bg-[var(--theme-light)]">
-                 <ShieldCheck className="w-7 h-7 shrink-0 text-[var(--theme-color)]" />
-                 <div>
-                   <h4 className="text-[13px] font-bold text-slate-900">Acceso seguro</h4>
-                   <p className="text-[11px] text-slate-500 leading-snug mt-0.5">Tus datos están protegidos con conexión segura y autenticación encriptada.</p>
-                 </div>
-              </div>
-
-              {/* Mobile Quick Features (Mobile only) */}
-              <div className="md:hidden pt-8 border-t border-slate-100 mt-8">
-                <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
-                  <div className="flex flex-col items-center text-center group">
-                    <div className="w-12 h-12 rounded-[1rem] flex items-center justify-center mb-2 shadow-xs bg-[var(--theme-light)] text-[var(--theme-color)]">
-                      <Package className="w-5 h-5" />
-                    </div>
-                    <div className="text-[9px] sm:text-[10px] font-black text-slate-800 leading-tight">Gestiona tus<br/>paquetes</div>
-                    <div className="text-[7px] sm:text-[8px] text-slate-400 mt-1 leading-tight font-medium">Recibe y revisa<br/>tus entregas.</div>
-                  </div>
-                  
-                  <div className="flex flex-col items-center text-center group">
-                    <div className="w-12 h-12 rounded-[1rem] flex items-center justify-center mb-2 shadow-xs bg-[var(--theme-light)] text-[var(--theme-color)]">
-                      <User className="w-5 h-5" />
-                    </div>
-                    <div className="text-[9px] sm:text-[10px] font-black text-slate-800 leading-tight">Autoriza<br/>visitas</div>
-                    <div className="text-[7px] sm:text-[8px] text-slate-400 mt-1 leading-tight font-medium">Desde<br/>cualquier lugar.</div>
-                  </div>
-
-                  <div className="flex flex-col items-center text-center group">
-                    <div className="w-12 h-12 rounded-[1rem] flex items-center justify-center mb-2 shadow-xs bg-[var(--theme-light)] text-[var(--theme-color)]">
-                      <Wrench className="w-5 h-5" />
-                    </div>
-                    <div className="text-[9px] sm:text-[10px] font-black text-slate-800 leading-tight">Reporta<br/>daños</div>
-                    <div className="text-[7px] sm:text-[8px] text-slate-400 mt-1 leading-tight font-medium">Mantén tu hogar<br/>en perfecto estado.</div>
-                  </div>
-
-                  <div className="flex flex-col items-center text-center group">
-                    <div className="w-12 h-12 rounded-[1rem] flex items-center justify-center mb-2 shadow-xs bg-[var(--theme-light)] text-[var(--theme-color)]">
-                      <Calendar className="w-5 h-5" />
-                    </div>
-                    <div className="text-[9px] sm:text-[10px] font-black text-slate-800 leading-tight">Reserva<br/>zonas comunes</div>
-                    <div className="text-[7px] sm:text-[8px] text-slate-400 mt-1 leading-tight font-medium">De forma rápida<br/>y sencilla.</div>
-                  </div>
-                </div>
-              </div>
-
-            </CardContent>
-          </Card>
         </div>
+
       </div>
+
     </div>
   );
 };

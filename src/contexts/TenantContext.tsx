@@ -1,8 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import type { Tenant } from '../types';
-import { getSSOCookie } from '../utils/cookieUtils';
-
+import { getSubdomainFromHost, getBaseDomain, isIpAddress } from '../utils/domainUtils';
 interface TenantContextProps {
   currentTenant: Tenant | null;
   setCurrentTenant: (tenant: Tenant) => void;
@@ -11,8 +10,6 @@ interface TenantContextProps {
 }
 
 const TenantContext = createContext<TenantContextProps | undefined>(undefined);
-
-import { getSubdomainFromHost, getBaseDomain } from '../utils/domainUtils';
 
 export const TenantProvider = ({ children }: { children: ReactNode }) => {
   const [availableTenants, setAvailableTenants] = useState<Tenant[]>([]);
@@ -27,22 +24,25 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
       try {
         setIsResolving(true);
         if (sub && sub !== 'admin' && sub !== 'super') {
-          // The backend will now resolve the tenant via the Host header
-          const res = await fetch(`/api/v1/public/tenant-config`);
+          // If accessing via IP, pass ?subdomain= explicitly so backend can resolve it
+          const fetchUrl = isIpAddress(window.location.hostname)
+            ? `/api/v1/public/tenant-config?subdomain=${encodeURIComponent(sub)}`
+            : `/api/v1/public/tenant-config`;
+
+          const res = await fetch(fetchUrl);
           if (res.ok) {
             const data = await res.json();
             if (data?.data) {
               const backendTenant: Tenant = {
                 id: data.data.id,
                 name: data.data.name,
-                slug: data.data.subdomain || sub, // Since slug might not be returned, use sub
+                slug: data.data.subdomain || sub,
                 subdomain: data.data.subdomain || sub,
                 logo: data.data.logoUrl || sub.substring(0, 3).toUpperCase(),
                 primaryColor: data.data.primaryColor || '#1849A9',
                 secondaryColor: data.data.secondaryColor || '#12B76A',
                 address: data.data.address,
                 city: data.data.city,
-                // Dummy values for required Tenant fields not returned by public config
                 phone: '',
                 email: '',
                 unitsCount: 150,
@@ -51,8 +51,7 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
                 status: 'ACTIVE',
               };
               setCurrentTenantState(backendTenant);
-              localStorage.setItem('havita_tenant', JSON.stringify(backendTenant));
-            }
+              localStorage.setItem('havita_tenant', JSON.stringify(backendTenant));            }
           } else {
             // Tenant not found
             setCurrentTenantState(null);
@@ -60,14 +59,27 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
             window.dispatchEvent(new Event('havita_tenant_not_found'));
           }
         } else {
-            // Global admin portal or no subdomain
+          // Global admin portal or no subdomain
+          // When on raw IP without subdomain, check if there's a stored tenant
+          if (isIpAddress(window.location.hostname)) {
+            const savedTenant = localStorage.getItem('havita_tenant');
+            if (savedTenant) {
+              try {
+                const parsed = JSON.parse(savedTenant);
+                setCurrentTenantState(parsed);              } catch {
+                setCurrentTenantState(null);
+                localStorage.removeItem('havita_tenant');
+              }
+            } else {
+              setCurrentTenantState(null);
+            }
+          } else {
             setCurrentTenantState(null);
             localStorage.removeItem('havita_tenant');
+          }
         }
 
-        // We removed the public tenant list. The selector in the login page will be hidden.
         setAvailableTenants([]);
-        
       } catch (err) {
         console.warn('Backend public tenants endpoint offline or in mock mode:', err);
       } finally {
@@ -78,29 +90,25 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
     syncTenantFromBackend();
   }, []);
 
-    // No storage listeners. URL is the only source of truth.
-
   const setCurrentTenant = (tenant: Tenant) => {
     const currentHost = window.location.hostname;
     const currentSubdomain = getSubdomainFromHost();
     
-    // If subdomain is the same, just update state and local storage
-    if (currentSubdomain === tenant.subdomain) {
+    // If accessing via raw IP address or subdomain is the same, stay on current IP without breaking URL
+    if (isIpAddress(currentHost) || currentSubdomain === tenant.subdomain) {
       setCurrentTenantState(tenant);
       localStorage.setItem('havita_tenant', JSON.stringify(tenant));
       return;
     }
 
-    // If the subdomain is changing, do a hard redirect to the new URL
+    // If the subdomain is changing on standard domain, do a hard redirect to the new URL
     const baseDomain = getBaseDomain(currentHost);
     
-    // Determine target URL
     const protocol = window.location.protocol;
     const port = window.location.port ? `:${window.location.port}` : '';
     
     const newHost = `${tenant.subdomain}.${baseDomain}`;
     
-    // Preserve the current path and query string so they land on the same page
     const currentPath = window.location.pathname + window.location.search;
     
     let targetPath = currentPath;

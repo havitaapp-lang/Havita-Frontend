@@ -18,6 +18,9 @@ import { ClosePollConfirmModal } from '../components/ClosePollConfirmModal';
 import { AssemblyQRModal } from '../components/AssemblyQRModal';
 import { AssemblyAttendanceList } from '../components/AssemblyAttendanceList';
 import { notificationService } from '../../../services/notificationService';
+import { assemblyStatusAction } from '../utils/assemblyStatusAction';
+import { AdminProxyPanel } from '../proxies/components/AdminProxyPanel';
+import { isAssemblyProxiesEnabled } from '../proxies/featureFlags';
 
 export const AssemblyDetailPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -27,7 +30,7 @@ export const AssemblyDetailPage = () => {
   const [polls, setPolls] = useState<Poll[]>([]);
   const [isCreatePollOpen, setIsCreatePollOpen] = useState(false);
   const [isQROpen, setIsQROpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'votaciones' | 'asistencia'>('votaciones');
+  const [activeTab, setActiveTab] = useState<'votaciones' | 'asistencia' | 'poderes'>('votaciones');
   const [closingPoll, setClosingPoll] = useState<Poll | null>(null);
   const [loadingClose, setLoadingClose] = useState(false);
 
@@ -49,7 +52,7 @@ export const AssemblyDetailPage = () => {
       <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 shadow-2xs space-y-3">
         <p className="font-bold text-slate-800 text-sm">Asamblea no encontrada</p>
         <button
-          onClick={() => navigate('/admin/asambleas')}
+          onClick={() => navigate('/admin/assemblies')}
           className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors"
         >
           Volver a Asambleas
@@ -83,13 +86,21 @@ export const AssemblyDetailPage = () => {
     }
   };
 
+  // P5-D: una asamblea finalizada no se reabre; programada → iniciar, en curso → finalizar.
+  const statusAction = assemblyStatusAction(assembly.status);
+
   const handleToggleAssemblyStatus = async () => {
-    const nextStatus = assembly.status === 'IN_PROGRESS' ? 'ENDED' : 'IN_PROGRESS';
-    await assemblyService.updateAssemblyStatus(assembly.id, nextStatus);
-    notificationService.showToast(
-      `Asamblea marcada como ${nextStatus}`,
-      nextStatus === 'ENDED' ? 'info' : 'success'
-    );
+    if (!statusAction) return;
+    const { nextStatus } = statusAction;
+    try {
+      await assemblyService.updateAssemblyStatus(assembly.id, nextStatus);
+      notificationService.showToast(
+        `Asamblea marcada como ${nextStatus}`,
+        nextStatus === 'ENDED' ? 'info' : 'success'
+      );
+    } catch {
+      notificationService.showToast('No se pudo cambiar el estado de la asamblea', 'error');
+    }
     loadData();
   };
 
@@ -98,7 +109,7 @@ export const AssemblyDetailPage = () => {
       {/* Top back button & controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <button
-          onClick={() => navigate('/admin/asambleas')}
+          onClick={() => navigate('/admin/assemblies')}
           className="flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-blue-600 transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -106,26 +117,23 @@ export const AssemblyDetailPage = () => {
         </button>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleToggleAssemblyStatus}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
-              assembly.status === 'IN_PROGRESS'
-                ? 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
-            }`}
-          >
-            {assembly.status === 'IN_PROGRESS' ? (
-              <>
+          {statusAction && (
+            <button
+              onClick={handleToggleAssemblyStatus}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                statusAction.nextStatus === 'ENDED'
+                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
+              }`}
+            >
+              {statusAction.nextStatus === 'ENDED' ? (
                 <Lock className="w-3.5 h-3.5" />
-                Finalizar Sesión
-              </>
-            ) : (
-              <>
+              ) : (
                 <Play className="w-3.5 h-3.5" />
-                Reabrir Sesión
-              </>
-            )}
-          </button>
+              )}
+              {statusAction.label}
+            </button>
+          )}
 
           <button
             onClick={() => setIsQROpen(true)}
@@ -214,6 +222,16 @@ export const AssemblyDetailPage = () => {
         >
           Quórum y Asistencia
         </button>
+        {isAssemblyProxiesEnabled() && (
+          <button
+            onClick={() => setActiveTab('poderes')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+              activeTab === 'poderes' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            Poderes y voto asistido
+          </button>
+        )}
       </div>
 
       {activeTab === 'votaciones' ? (
@@ -315,6 +333,8 @@ export const AssemblyDetailPage = () => {
             </div>
           )}
         </div>
+      ) : activeTab === 'poderes' ? (
+        <AdminProxyPanel assembly={assembly} polls={polls} />
       ) : (
         <AssemblyAttendanceList assembly={assembly} />
       )}

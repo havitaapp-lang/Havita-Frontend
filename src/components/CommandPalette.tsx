@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Users, Package, ShieldCheck, Wrench, X, ArrowRight } from 'lucide-react';
+import { Search, Users, Package, ShieldCheck, Wrench, X, ArrowRight, PhoneCall, UserCircle } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
 import { useData } from '../contexts/DataContext';
 import { getStatusLabel } from '../utils/statusLabels';
@@ -9,8 +10,15 @@ export const CommandPalette: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { currentTenant } = useTenant();
   const { residents, packages, visitors, pqrsList } = useData();
+
+  const profilePath = user?.role === 'SECURITY' 
+    ? '/security/profile' 
+    : user?.role === 'RESIDENT' 
+    ? '/resident/profile' 
+    : '/admin/profile';
 
   // Keyboard shortcut Ctrl+K or Cmd+K
   useEffect(() => {
@@ -120,6 +128,26 @@ export const CommandPalette: React.FC = () => {
                 <span className="flex items-center gap-2.5">
                   <Wrench className="w-4 h-4 text-rose-500" />
                   PQRS y Daños de Infraestructura
+                </span>
+                <ArrowRight className="w-3.5 h-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+              <button
+                onClick={() => handleSelect('/admin/intercom')}
+                className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 rounded-lg group transition-colors"
+              >
+                <span className="flex items-center gap-2.5">
+                  <PhoneCall className="w-4 h-4 text-blue-500" />
+                  Citofonía Digital
+                </span>
+                <ArrowRight className="w-3.5 h-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+              <button
+                onClick={() => handleSelect(profilePath)}
+                className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 rounded-lg group transition-colors"
+              >
+                <span className="flex items-center gap-2.5">
+                  <UserCircle className="w-4 h-4 text-indigo-500" />
+                  Mi Perfil
                 </span>
                 <ArrowRight className="w-3.5 h-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
               </button>

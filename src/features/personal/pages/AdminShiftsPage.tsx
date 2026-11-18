@@ -12,7 +12,7 @@ import {
   Users,
   ShieldAlert,
 } from 'lucide-react';
-import { shiftService } from '../services/shiftService';
+import { shiftService, getTodayDateStr } from '../services/shiftService';
 import type { Shift, ShiftStatus, GateCoverageSlot } from '../types/personal.types';
 import { CreateShiftModal } from '../components/CreateShiftModal';
 import { ChangeGuardModal } from '../components/ChangeGuardModal';
@@ -25,7 +25,7 @@ export const AdminShiftsPage: React.FC = () => {
 
   // Filters
   const [search, setSearch] = useState('');
-  const [dateFilter, setDateFilter] = useState('2026-09-14');
+  const [dateFilter, setDateFilter] = useState(getTodayDateStr());
   const [gateFilter, setGateFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState<ShiftStatus | 'ALL'>('ALL');
 
@@ -46,7 +46,7 @@ export const AdminShiftsPage: React.FC = () => {
       });
       setShifts(allShifts);
 
-      const slots = await shiftService.getCoverageSlots(dateFilter || '2026-09-14');
+      const slots = await shiftService.getCoverageSlots(dateFilter || getTodayDateStr());
       setCoverageSlots(slots);
     } catch {
       notificationService.showError('Error', 'No se pudieron cargar los turnos');
@@ -75,7 +75,13 @@ export const AdminShiftsPage: React.FC = () => {
   };
 
   const handleDuplicateShift = async (shift: Shift) => {
-    const nextDay = '2026-09-15';
+    const current = shift.date ? new Date(`${shift.date}T12:00:00`) : new Date();
+    current.setDate(current.getDate() + 1);
+    const yyyy = current.getFullYear();
+    const mm = String(current.getMonth() + 1).padStart(2, '0');
+    const dd = String(current.getDate()).padStart(2, '0');
+    const nextDay = `${yyyy}-${mm}-${dd}`;
+
     await shiftService.duplicateShift(shift.id, nextDay);
     notificationService.showToast(`✓ Turno duplicado con éxito para el ${nextDay}`, 'success');
     loadData();
@@ -236,25 +242,40 @@ export const AdminShiftsPage: React.FC = () => {
       </div>
 
       {/* SECTION 25: CAMBIO DE TURNO / RELEVO EN PORTERÍA PRINCIPAL */}
-      <div className="p-4 bg-slate-900 text-white rounded-2xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-amber-400 font-bold">
-            ⚡
-          </div>
-          <div>
-            <span className="font-bold text-slate-200 block">Esquema de Relevo Operativo (Portería Principal):</span>
-            <div className="flex items-center gap-2 mt-0.5 text-slate-300 font-mono text-[11px]">
-              <span className="text-white font-bold">Carlos Rodríguez (06:00 AM — 06:00 PM)</span>
-              <span>↓ relevo con</span>
-              <span className="text-amber-400 font-bold">Andrés Martínez (06:00 PM — 06:00 AM)</span>
-            </div>
-          </div>
-        </div>
+      {(() => {
+        const mainDay = coverageSlots.find(
+          (s) => s.gate.toLowerCase().includes('principal') && s.rawStartTime === '06:00'
+        );
+        const mainNight = coverageSlots.find(
+          (s) => s.gate.toLowerCase().includes('principal') && s.rawStartTime === '18:00'
+        );
 
-        <span className="px-2.5 py-1 rounded-lg bg-white/10 text-slate-300 font-mono text-[11px] self-start md:self-auto">
-          24h Cobertura Continua
-        </span>
-      </div>
+        return (
+          <div className="p-4 bg-slate-900 text-white rounded-2xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-amber-400 font-bold shrink-0">
+                ⚡
+              </div>
+              <div>
+                <span className="font-bold text-slate-200 block">Esquema de Relevo Operativo (Portería Principal):</span>
+                <div className="flex items-center gap-2 mt-0.5 text-slate-300 font-mono text-[11px] flex-wrap">
+                  <span className={mainDay?.guardName ? "text-white font-bold" : "text-rose-400 font-bold"}>
+                    {mainDay?.guardName || 'Sin asignar'} (06:00 AM — 06:00 PM)
+                  </span>
+                  <span>↓ relevo con</span>
+                  <span className={mainNight?.guardName ? "text-amber-400 font-bold" : "text-rose-400 font-bold"}>
+                    {mainNight?.guardName || 'Sin asignar'} (06:00 PM — 06:00 AM)
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <span className="px-2.5 py-1 rounded-lg bg-white/10 text-slate-300 font-mono text-[11px] self-start md:self-auto shrink-0">
+              24h Cobertura Continua
+            </span>
+          </div>
+        );
+      })()}
 
       {/* FILTERS BAR */}
       <div className="p-4 bg-white rounded-3xl border border-slate-200/80 shadow-2xs flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between text-xs">

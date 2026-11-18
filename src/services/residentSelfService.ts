@@ -4,6 +4,14 @@
  */
 import { apiClient } from "../api/apiClient";
 import type { Vehicle, Pet } from "../types";
+import { activeUnitStore } from "../features/resident/unit/activeUnitStore";
+
+/**
+ * Fase 2 / E2: todas las rutas de este servicio dependen de la unidad seleccionada (`X-Property-Id`). El llamador
+ * puede fijar la unidad (p. ej. la de la clave de su consulta); si no, se toma la unidad activa de esta pestaña en el
+ * momento de la llamada. El backend la valida y nunca la sustituye por otra.
+ */
+const unit = (unitId?: string | null) => ({ unitId: unitId ?? activeUnitStore.getActiveUnitId() });
 
 export interface ResidentCreateVehicleDto {
   plate: string;
@@ -26,48 +34,63 @@ const BASE = "/resident/me";
 
 export const residentSelfService = {
 
-  getMyPeople: (): Promise<any[]> => apiClient.get<any[]>('/resident/me/people').then((r) => r ?? []),
+  getMyPeople: (unitId?: string | null): Promise<any[]> =>
+    apiClient.get<any[]>('/resident/me/people', undefined, unit(unitId)).then((r) => r ?? []),
 
-  inviteResident: (data: any): Promise<any> => apiClient.post<any>('/resident/me/invitations', data),
+  inviteResident: (data: any, unitId?: string | null): Promise<any> =>
+    apiClient.post<any>('/resident/me/invitations', data, unit(unitId ?? data?.propertyId)),
 
-  cancelInvitation: (invitationId: string): Promise<void> => apiClient.delete<void>(`/resident/me/invitations/${invitationId}`),
+  cancelInvitation: (invitationId: string, unitId?: string | null): Promise<void> =>
+    apiClient.delete<void>(`/resident/me/invitations/${invitationId}`, unit(unitId)),
 
-  terminatePerson: (personId: string): Promise<void> => apiClient.delete<void>(`/resident/me/people/${personId}`),
+  /** SEC-7: el enlace solo se entrega al emitir; para volver a compartirlo, su emisor genera uno nuevo (revoca el anterior). */
+  regenerateInvitation: (invitationId: string, unitId?: string | null): Promise<any> =>
+    apiClient.post<any>(`/resident/me/invitations/${invitationId}/regenerate`, undefined, unit(unitId)),
 
-  reactivatePerson: (personId: string): Promise<void> => apiClient.patch<void>(`/resident/me/people/${personId}/reactivate`, {}),
+  terminatePerson: (personId: string, unitId?: string | null): Promise<void> =>
+    apiClient.delete<void>(`/resident/me/people/${personId}`, unit(unitId)),
+
+  reactivatePerson: (personId: string, unitId?: string | null): Promise<void> =>
+    apiClient.patch<void>(`/resident/me/people/${personId}/reactivate`, {}, unit(unitId)),
 
 
   // ─── Info y Estado ───────────────────────────────────────────────────────────
 
-  getMyPropertyInfo: (): Promise<{
+  getMyPropertyInfo: (unitId?: string | null): Promise<{
     propertyId: string;
     number: string;
     name: string;
     status: string;
     hasCompletedOnboarding: boolean;
-  }> => apiClient.get<any>(`${BASE}/property-info`),
+  }> => apiClient.get<any>(`${BASE}/property-info`, undefined, unit(unitId)),
 
   // ─── Vehículos ───────────────────────────────────────────────────────────────
 
-  getMyVehicles: (): Promise<Vehicle[]> =>
-    apiClient.get<any>(`${BASE}/vehicles`).then((r) => r ?? []),
+  getMyVehicles: (unitId?: string | null): Promise<Vehicle[]> =>
+    apiClient.get<any>(`${BASE}/vehicles`, undefined, unit(unitId)).then((r) => r ?? []),
 
-  addMyVehicle: (data: ResidentCreateVehicleDto): Promise<Vehicle> =>
-    apiClient.post<any>(`${BASE}/vehicles`, data),
+  addMyVehicle: (data: ResidentCreateVehicleDto, unitId?: string | null): Promise<Vehicle> =>
+    apiClient.post<any>(`${BASE}/vehicles`, data, unit(unitId)),
 
-  deleteMyVehicle: (vehicleId: string): Promise<void> =>
-    apiClient.delete<void>(`${BASE}/vehicles/${vehicleId}`),
+  updateMyVehicle: (vehicleId: string, data: ResidentCreateVehicleDto, unitId?: string | null): Promise<Vehicle> =>
+    apiClient.put<any>(`${BASE}/vehicles/${vehicleId}`, data, unit(unitId)),
+
+  deleteMyVehicle: (vehicleId: string, unitId?: string | null): Promise<void> =>
+    apiClient.delete<void>(`${BASE}/vehicles/${vehicleId}`, unit(unitId)),
 
   // ─── Mascotas ────────────────────────────────────────────────────────────────
 
-  getMyPets: (): Promise<Pet[]> =>
-    apiClient.get<any>(`${BASE}/pets`).then((r) => r ?? []),
+  getMyPets: (unitId?: string | null): Promise<Pet[]> =>
+    apiClient.get<any>(`${BASE}/pets`, undefined, unit(unitId)).then((r) => r ?? []),
 
-  addMyPet: (data: ResidentCreatePetDto): Promise<Pet> =>
-    apiClient.post<any>(`${BASE}/pets`, data),
+  addMyPet: (data: ResidentCreatePetDto, unitId?: string | null): Promise<Pet> =>
+    apiClient.post<any>(`${BASE}/pets`, data, unit(unitId)),
 
-  deleteMyPet: (petId: string): Promise<void> =>
-    apiClient.delete<void>(`${BASE}/pets/${petId}`),
+  updateMyPet: (petId: string, data: ResidentCreatePetDto, unitId?: string | null): Promise<Pet> =>
+    apiClient.put<any>(`${BASE}/pets/${petId}`, data, unit(unitId)),
+
+  deleteMyPet: (petId: string, unitId?: string | null): Promise<void> =>
+    apiClient.delete<void>(`${BASE}/pets/${petId}`, unit(unitId)),
 
   // ─── Onboarding ──────────────────────────────────────────────────────────────
 

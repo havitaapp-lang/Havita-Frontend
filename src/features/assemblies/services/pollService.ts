@@ -2,21 +2,63 @@ import type { Poll, PollOption, VoteRecord } from '../types/assembly.types';
 import { livePollService } from './livePollService';
 import { apiClient } from '../../../api/apiClient';
 
+/** Fase 2 / E3 (D5): una unidad del residente frente a una pregunta (GET /assemblies/polls/{id}/my-voting-units). */
+export interface MyVotingUnit {
+  propertyId: string;
+  label: string;
+  number: string;
+  relations: string[];
+  status: 'VOTED' | 'PENDING' | 'NOT_ELIGIBLE' | 'CLOSED';
+  hasVoted: boolean;
+  canVote: boolean;
+  reasonCode?: string | null;
+  reasonMessage?: string | null;
+}
+
 class PollService {
   private mapPoll(data: any): Poll {
+    const rawCoef = Number(data.totalVotedCoefficient || 0);
+    const participationRate = rawCoef > 0 && rawCoef <= 1.0 
+      ? Number((rawCoef * 100).toFixed(1)) 
+      : Number(rawCoef.toFixed(1));
+
+    let formattedCreatedAt = data.createdAt;
+    if (data.createdAt) {
+      try {
+        const d = new Date(data.createdAt);
+        if (!isNaN(d.getTime())) {
+          formattedCreatedAt = d.toLocaleDateString('es-CO', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric'
+          });
+        }
+      } catch {
+        // fallback
+      }
+    }
+
     return {
       ...data,
       totalEligible: 100, // Hardcoded for now, or fetch from assembly
-      participationRate: data.totalVotedCoefficient || 0,
+      participationRate: participationRate || 0,
+      createdAt: formattedCreatedAt || data.createdAt || '',
+      rawCreatedAt: data.createdAt,
     };
   }
 
   async getPolls(assemblyId?: string): Promise<Poll[]> {
-    if (assemblyId) {
-      const data = await apiClient.get<any[]>('/assemblies/' + assemblyId + '/polls');
+    try {
+      if (assemblyId) {
+        const data = await apiClient.get<any[]>('/assemblies/' + assemblyId + '/polls');
+        return (data || []).map((p: any) => this.mapPoll(p));
+      }
+      const data = await apiClient.get<any[]>('/assemblies/polls');
       return (data || []).map((p: any) => this.mapPoll(p));
+    } catch (err) {
+      console.warn("Could not fetch polls from backend:", err);
+      return [];
     }
-    return []; // We don't fetch all polls across assemblies for now
   }
 
   async getPollById(id: string): Promise<Poll | null> {
@@ -90,22 +132,20 @@ class PollService {
       optionIds: [optionId]
     };
     const poll = await apiClient.post<any>('/assemblies/polls/' + pollId + '/vote', req);
-    
-    // Save per-property vote flag in localStorage for quick frontend checks
-    localStorage.setItem('havita_voted_' + pollId + '_' + propertyId, optionId);
-    
+    // Fase 2 / E5: sin marca en localStorage; el estado de voto de cada unidad se lee siempre del backend.
     return { success: true, poll: this.mapPoll(poll) };
   }
 
-  hasPropertyVoted(pollId: string, propertyId: string): boolean {
-    const localFlag = localStorage.getItem('havita_voted_' + pollId + '_' + propertyId);
-    return !!localFlag;
+  /** Fase 2 / E3: estado de voto de cada unidad del residente, según el backend (la fuente de verdad). */
+  async getMyVotingUnits(pollId: string): Promise<MyVotingUnit[]> {
+    const data = await apiClient.get<MyVotingUnit[]>('/assemblies/polls/' + pollId + '/my-voting-units');
+    return Array.isArray(data) ? data : [];
   }
 
-  getPropertyVote(pollId: string, propertyId: string): string | null {
-    return localStorage.getItem('havita_voted_' + pollId + '_' + propertyId);
-  }
 }
+
+/** Fase 2 / E5: clave de React Query del estado de voto de las unidades del residente en una pregunta. */
+export const myVotingUnitsKey = (pollId: string) => ['myVotingUnits', pollId] as const;
 
 export const pollService = new PollService();
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Bell, Clock, Loader2, ShieldAlert
+  Bell, Clock, Loader2, ShieldAlert, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { panicService } from '../../services/panicService';
 import type { PanicAlert } from '../../types';
@@ -30,6 +30,8 @@ export default function SecurityAlerts() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [resolveModal, setResolveModal] = useState<{ id: string; notes: string } | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(5);
   
   const audioCtxRef = useRef<AudioContext | null>(null);
 
@@ -95,13 +97,14 @@ export default function SecurityAlerts() {
   const loadHistory = async () => {
     setLoading(true);
     try {
-      const res = await panicService.getAllAlerts(0, 50);
+      const res = await panicService.getAllAlerts(0, 100);
       setHistoryAlerts(res.content.filter(a => !isMineOrActive(a)));
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
 
   useEffect(() => {
+    setCurrentPage(1);
     if (tab === 'active') loadActive();
     else loadHistory();
   }, [tab]);
@@ -175,6 +178,17 @@ export default function SecurityAlerts() {
   };
 
   const displayAlerts = tab === 'active' ? activeAlerts : historyAlerts;
+  const totalPages = Math.ceil(displayAlerts.length / itemsPerPage) || 1;
+  const paginatedAlerts = displayAlerts.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 mb-20">
@@ -224,7 +238,7 @@ export default function SecurityAlerts() {
         </div>
       ) : (
         <div className="space-y-4">
-          {displayAlerts.map(alert => {
+          {paginatedAlerts.map(alert => {
             const badge = STATUS_BADGE[alert.status] ?? STATUS_BADGE.ACTIVE;
             const isAckLoading = actionLoading === alert.id + '_ack';
             const isActive = alert.status === 'ACTIVE';
@@ -232,55 +246,61 @@ export default function SecurityAlerts() {
             return (
               <div
                 key={alert.id}
-                className={`bg-white rounded-2xl p-5 shadow-sm transition-all ${
+                className={`bg-white rounded-2xl p-5 shadow-sm transition-all overflow-hidden ${
                   isActive ? 'border-2 border-red-400 ring-4 ring-red-50' : 'border border-gray-200'
                 }`}
               >
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                  <div className="flex items-start gap-4 flex-1">
-                    <div className={`p-3 rounded-2xl ${isActive ? 'bg-red-50' : 'bg-gray-50'}`}>
+                  <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                    <div className={`p-3 rounded-2xl shrink-0 ${isActive ? 'bg-red-50' : 'bg-gray-50'}`}>
                       <span className="text-3xl block transform group-hover:scale-110 transition-transform">
                         {ALERT_ICONS[alert.alertType] ?? '⚠️'}
                       </span>
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-bold text-gray-900 text-lg leading-tight">{alert.alertTypeLabel}</h3>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${badge.color}`}>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2 mb-1">
+                        <h3 className="font-bold text-gray-900 text-lg leading-tight truncate">{alert.alertTypeLabel}</h3>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0 ${badge.color}`}>
                           {badge.label}
                         </span>
                       </div>
                       
                       {alert.residentName && (
-                        <p className="text-gray-700 font-medium flex items-center gap-1.5 mt-2">
+                        <p className="text-gray-700 font-medium flex items-center gap-1.5 mt-1.5 text-sm truncate">
                           <span className="text-gray-400">👤</span> {alert.residentName}
                         </p>
                       )}
                       {alert.propertyPath && (
-                        <p className="text-gray-700 font-medium flex items-center gap-1.5 mt-1">
+                        <p className="text-gray-700 font-medium flex items-center gap-1.5 mt-1 text-sm truncate">
                           <span className="text-gray-400">🏠</span> {alert.propertyPath}
                         </p>
-                      )}
-                      {alert.notes && (
-                        <div className="mt-3 bg-amber-50 border border-amber-100 rounded-lg p-3">
-                          <p className="text-sm text-amber-900 italic">"{alert.notes}"</p>
-                        </div>
                       )}
                     </div>
                   </div>
 
-                  <div className="flex flex-col sm:items-end gap-1 min-w-[140px] pt-1">
-                    <div className="flex items-center gap-1.5 text-xs text-gray-500 font-medium">
-                      <Clock className="h-3.5 w-3.5" />
+                  <div className="flex flex-col sm:items-end gap-1 shrink-0 pt-0.5 sm:text-right">
+                    <div className="flex items-center gap-1.5 text-xs text-gray-500 font-medium whitespace-nowrap">
+                      <Clock className="h-3.5 w-3.5 shrink-0" />
                       <span>{new Date(alert.createdAt).toLocaleString('es-CO')}</span>
                     </div>
                     {alert.acknowledgedByName && (
-                      <p className="text-[11px] text-amber-700 font-medium mt-1.5 bg-amber-50 px-2 py-1 rounded-md">
+                      <p 
+                        className="text-[11px] text-amber-700 font-medium mt-1 bg-amber-50 border border-amber-200/60 px-2 py-1 rounded-md max-w-full sm:max-w-[220px] truncate"
+                        title={`Tomada por ${alert.acknowledgedByName}`}
+                      >
                         ✔️ Tomada por {alert.acknowledgedByName}
                       </p>
                     )}
                   </div>
                 </div>
+
+                {alert.notes && (
+                  <div className="mt-3.5 bg-amber-50/80 border border-amber-200/80 rounded-xl p-3 min-w-0">
+                    <p className="text-sm text-amber-950 italic break-words [overflow-wrap:anywhere]">
+                      "{alert.notes}"
+                    </p>
+                  </div>
+                )}
 
                 {(alert.status === 'ACTIVE' || alert.status === 'ACKNOWLEDGED') && (
                   <div className="mt-5 pt-4 border-t border-gray-100 flex flex-col sm:flex-row gap-3">
@@ -288,7 +308,7 @@ export default function SecurityAlerts() {
                       <button
                         onClick={() => handleAcknowledge(alert.id)}
                         disabled={!!actionLoading}
-                        className="flex-1 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-sm font-bold rounded-xl py-3 disabled:opacity-50 transition-all shadow-sm flex items-center justify-center gap-2"
+                        className="flex-1 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-sm font-bold rounded-xl py-3 disabled:opacity-50 transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
                       >
                         {isAckLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : '✋ Tomar caso'}
                       </button>
@@ -297,7 +317,7 @@ export default function SecurityAlerts() {
                       <button
                         onClick={() => setResolveModal({ id: alert.id, notes: '' })}
                         disabled={!!actionLoading}
-                        className="flex-1 bg-gray-800 hover:bg-gray-900 active:bg-black text-white text-sm font-bold rounded-xl py-3 disabled:opacity-50 transition-all shadow-sm flex items-center justify-center gap-2"
+                        className="flex-1 bg-gray-800 hover:bg-gray-900 active:bg-black text-white text-sm font-bold rounded-xl py-3 disabled:opacity-50 transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
                       >
                         Resolver alerta
                       </button>
@@ -307,6 +327,63 @@ export default function SecurityAlerts() {
               </div>
             );
           })}
+
+          {/* Pagination Bar */}
+          {displayAlerts.length > 0 && (
+            <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-500 mt-6">
+              <span className="order-2 sm:order-1 text-center sm:text-left">
+                Mostrando <strong className="text-gray-900 font-bold">{(currentPage - 1) * itemsPerPage + 1}</strong> a{' '}
+                <strong className="text-gray-900 font-bold">{Math.min(currentPage * itemsPerPage, displayAlerts.length)}</strong> de{' '}
+                <strong className="text-gray-900 font-bold">{displayAlerts.length}</strong> alerta{displayAlerts.length !== 1 ? 's' : ''}
+              </span>
+
+              <div className="order-1 sm:order-2 flex items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-gray-400">Mostrar:</span>
+                  <select
+                    value={itemsPerPage}
+                    onChange={(e) => {
+                      setItemsPerPage(Number(e.target.value));
+                      setCurrentPage(1);
+                    }}
+                    className="bg-gray-50 border border-gray-200 text-gray-700 text-xs rounded-lg px-2 py-1 focus:ring-1 focus:ring-gray-400 outline-none cursor-pointer font-medium"
+                  >
+                    <option value={5}>5</option>
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all font-medium text-gray-700 shadow-2xs cursor-pointer"
+                    title="Página anterior"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    <span className="hidden sm:inline">Anterior</span>
+                  </button>
+
+                  <span className="px-2 font-bold text-gray-800">
+                    {currentPage} / {totalPages}
+                  </span>
+
+                  <button
+                    type="button"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all font-medium text-gray-700 shadow-2xs cursor-pointer"
+                    title="Página siguiente"
+                  >
+                    <span className="hidden sm:inline">Siguiente</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

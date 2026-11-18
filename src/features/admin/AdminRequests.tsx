@@ -293,6 +293,7 @@ export const AdminRequests = () => {
               <option value="Todos">Todas las categorías</option>
               <option value="Plomería">Plomería</option>
               <option value="Eléctrico">Eléctrico</option>
+              <option value="Aseo / Zonas Comunes">Aseo / Zonas Comunes</option>
               <option value="Fachada/Paredes">Fachada/Paredes</option>
               <option value="Daño en Zona Común">Daño en Zona Común</option>
               <option value="Ruido / Convivencia">Ruido / Convivencia</option>
@@ -644,6 +645,7 @@ export const AdminRequests = () => {
                   >
                     <option value="Plomería">Plomería</option>
                     <option value="Eléctrico">Eléctrico</option>
+                    <option value="Aseo / Zonas Comunes">Aseo / Zonas Comunes</option>
                     <option value="Fachada/Paredes">Fachada</option>
                     <option value="Daño en Zona Común">Zona Común</option>
                     <option value="Ruido / Convivencia">Convivencia</option>

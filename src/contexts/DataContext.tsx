@@ -1,4 +1,5 @@
 import { panicService } from '../services/panicService';
+import { audienceMatchesUnit } from '../features/resident/unit/audience';
 import React, { createContext, useContext, useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import type { 
@@ -13,6 +14,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { visitorService } from "../services/visitorService";
 import { notificationService } from "../services/notificationService";
 import { formatFriendlyDateTime } from "../utils/formatters";
+import { resolveDataTenantId } from "./dataTenant";
+import { mergeCreatedVisitors, mergeStaffNames, sseVisitorPropertyKey } from "./visitorSync";
 
 interface DataContextType {
   residents: Resident[];
@@ -42,6 +45,8 @@ interface DataContextType {
   updatePackage: (_id: string, _pkg: Partial<Package>) => void;
   deletePackage: (_id: string) => void;
   markPackageDelivered: (_id: string) => void;
+  /** Residente: confirma que retiró SU paquete (lo valida el servidor; lanza el error si lo rechaza). */
+  confirmPackagePickup: (_id: string) => Promise<void>;
   createBatchPackages: (packages: Array<Omit<Package, "id" | "receivedAt">>) => Promise<Package[]>;
   deliverAllUnitPackages: (_propertyId: string) => Promise<number>;
 
@@ -79,9 +84,10 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { currentTenant } = useTenant();
-  const { isAuthenticated, user, userProperties } = useAuth();
+  const { isAuthenticated, user, userProperties, activePropertyId } = useAuth();
   const queryClient = useQueryClient();
-  const tenantId = currentTenant?.id || "";
+  // Comunidad del host o, sin subdominio (PWA instalada, dominio raíz), la de la sesión: ver resolveDataTenantId.
+  const tenantId = resolveDataTenantId(currentTenant?.id, user);
   const isResident = user?.role === "RESIDENT";
   // Espeja el @PreAuthorize de GET /realtime/panic/active (SUPER_ADMIN, COMMUNITY_ADMIN, SECURITY).
   // El residente consulta solo sus alertas vía GET /realtime/panic/my (ResidentEmergency).
@@ -101,10 +107,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         tenantId: p.tenantId || tenantId,
         name: p.name || p.number,
         number: p.number,
-        path: p.path || `${p.structureName || "Torre 1"} / ${p.number}`,
+        // Fase 2 / E4: sin estructura no se inventa una torre ("Torre 1"); la ruta es la unidad.
+        path: p.path || (p.structureName ? `${p.structureName} / ${p.number}` : p.number),
         type: p.type || "Apartamento",
         area: p.area,
         status: p.status || "VACANT",
+        structureId: p.structureId ?? null,
         structureName: p.structureName,
         structureType: p.structureType || "Torre",
         level: p.level,
@@ -221,22 +229,28 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const rawStatus = e.detail?.status || visitorObj?.status;
       if (!targetId) return;
 
-      const status = (rawStatus === 'AUTHORIZED' || rawStatus === 'AUTORIZADO') ? 'APPROVED' : 
-                     (rawStatus === 'PENDIENTE' ? 'PENDING' : 
-                     (rawStatus === 'INGRESO' ? 'ENTERED' : 
-                     (rawStatus === 'SALIO' ? 'EXITED' : 
-                     (rawStatus === 'EXPIRADO' ? 'EXPIRED' : rawStatus))));
+      const normStatus = String(rawStatus || '').toUpperCase();
+      const status = (normStatus === 'AUTHORIZED' || normStatus === 'AUTORIZADO' || normStatus === 'APPROVED') ? 'APPROVED' : 
+                     (normStatus === 'PENDIENTE' || normStatus === 'PENDING') ? 'PENDING' : 
+                     (normStatus === 'INGRESO' || normStatus === 'ENTERED') ? 'ENTERED' : 
+                     (normStatus === 'SALIO' || normStatus === 'EXITED') ? 'EXITED' : 
+                     (normStatus === 'EXPIRADO' || normStatus === 'EXPIRED') ? 'EXPIRED' : 
+                     (normStatus === 'CANCELADO' || normStatus === 'CANCELLED') ? 'CANCELLED' : rawStatus;
 
       setVisitors(prev => prev.map(v => {
-        if (v.id === targetId) {
+        if (v.id === targetId || String(v.id).toLowerCase() === String(targetId).toLowerCase()) {
           const merged = {
             ...v,
             status: status || v.status,
             enteredAt: status === 'ENTERED' ? (visitorObj?.enteredAt ? formatFriendlyDateTime(visitorObj.enteredAt) : new Date().toISOString()) : v.enteredAt,
             exitedAt: status === 'EXITED' ? (visitorObj?.exitedAt ? formatFriendlyDateTime(visitorObj.exitedAt) : new Date().toISOString()) : v.exitedAt,
+            ...mergeStaffNames(v, visitorObj),
           };
           if (visitorObj) {
-            if (visitorObj.expectedAt) merged.expectedAt = formatFriendlyDateTime(visitorObj.expectedAt) || visitorObj.expectedAt;
+            if (visitorObj.expectedAt) {
+              merged.expectedAt = formatFriendlyDateTime(visitorObj.expectedAt) || visitorObj.expectedAt;
+              merged.rawExpectedAt = visitorObj.expectedAt;
+            }
             if (visitorObj.name) merged.name = visitorObj.name;
             if (visitorObj.documentId) merged.documentId = visitorObj.documentId;
             if (visitorObj.vehiclePlate) merged.vehiclePlate = visitorObj.vehiclePlate;
@@ -247,6 +261,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         return v;
       }));
+
+      if (isResident && status === 'ENTERED') {
+        const visName = visitorObj?.name || 'Tu visita';
+        notificationService.showToast(`¡${visName} ha ingresado al conjunto!`, 'info');
+      } else if (!isResident && status === 'CANCELLED') {
+        const visName = visitorObj?.name || 'Un visitante';
+        notificationService.showToast(`Visita cancelada: ${visName} ha sido cancelada por el residente.`, 'warning');
+      }
     };
 
     const handleVisitorUpdated = (e: any) => {
@@ -255,22 +277,26 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (!targetId) return;
 
       setVisitors(prev => prev.map(v => {
-        if (v.id === targetId) {
+        if (v.id === targetId || String(v.id).toLowerCase() === String(targetId).toLowerCase()) {
           if (visitorObj) {
             const rawStatus = visitorObj.status;
-            const status = (rawStatus === 'AUTHORIZED' || rawStatus === 'AUTORIZADO') ? 'APPROVED' : 
-                           (rawStatus === 'PENDIENTE' ? 'PENDING' : 
-                           (rawStatus === 'INGRESO' ? 'ENTERED' : 
-                           (rawStatus === 'SALIO' ? 'EXITED' : 
-                           (rawStatus === 'EXPIRADO' ? 'EXPIRED' : (rawStatus || v.status)))));
+            const normStatus = String(rawStatus || '').toUpperCase();
+            const status = (normStatus === 'AUTHORIZED' || normStatus === 'AUTORIZADO' || normStatus === 'APPROVED') ? 'APPROVED' : 
+                           (normStatus === 'PENDIENTE' || normStatus === 'PENDING') ? 'PENDING' : 
+                           (normStatus === 'INGRESO' || normStatus === 'ENTERED') ? 'ENTERED' : 
+                           (normStatus === 'SALIO' || normStatus === 'EXITED') ? 'EXITED' : 
+                           (normStatus === 'EXPIRADO' || normStatus === 'EXPIRED') ? 'EXPIRED' : 
+                           (normStatus === 'CANCELADO' || normStatus === 'CANCELLED') ? 'CANCELLED' : (rawStatus || v.status);
             return {
               ...v,
               ...visitorObj,
               status,
-              propertyId: visitorObj.propertyNumber || visitorObj.propertyId || v.propertyId,
+              propertyId: sseVisitorPropertyKey(visitorObj, isResident) || v.propertyId,
               expectedAt: formatFriendlyDateTime(visitorObj.expectedAt) || visitorObj.expectedAt || v.expectedAt,
+              rawExpectedAt: visitorObj.expectedAt || v.rawExpectedAt,
               enteredAt: formatFriendlyDateTime(visitorObj.enteredAt) || visitorObj.enteredAt || v.enteredAt,
               exitedAt: formatFriendlyDateTime(visitorObj.exitedAt) || visitorObj.exitedAt || v.exitedAt,
+              ...mergeStaffNames(v, visitorObj),
             };
           }
         }
@@ -291,8 +317,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const mappedVisitor = {
           ...visitor,
           status: (visitor.status === 'AUTHORIZED' || visitor.status === 'AUTORIZADO') ? 'APPROVED' : (visitor.status === 'PENDIENTE' ? 'PENDING' : (visitor.status === 'INGRESO' ? 'ENTERED' : (visitor.status === 'SALIO' ? 'EXITED' : (visitor.status === 'EXPIRADO' ? 'EXPIRED' : visitor.status)))),
-        propertyId: visitor.propertyNumber || visitor.propertyId,
+        propertyId: sseVisitorPropertyKey(visitor, isResident),
           expectedAt: formatFriendlyDateTime(visitor.expectedAt),
+          rawExpectedAt: visitor.expectedAt,
           enteredAt: formatFriendlyDateTime(visitor.enteredAt),
           exitedAt: formatFriendlyDateTime(visitor.exitedAt)
         };
@@ -338,6 +365,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         id: pkg.id,
         tenantId: pkg.tenantId || tenantId,
         propertyId: pkg.propertyId,
+        propertyNumber: pkg.propertyNumber,
+        propertyName: pkg.propertyName,
         recipientName: pkg.recipientName,
         trackingNumber: pkg.trackingNumber,
         company: pkg.company,
@@ -349,7 +378,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setPackages(prev => {
         if (prev.some(p => p.id === mappedPkg.id)) return prev;
 
-        if (isResident && user?.residentPropertyId && mappedPkg.propertyId === user.residentPropertyId) {
+        if (isResident && activePropertyId && mappedPkg.propertyId === activePropertyId) {
           notificationService.showToast(`¡Nuevo paquete de ${mappedPkg.company} en portería!`, 'info');
         }
 
@@ -377,7 +406,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           : p
       ));
 
-      if (isResident && user?.residentPropertyId && pkg.propertyId === user.residentPropertyId) {
+      if (isResident && activePropertyId && pkg.propertyId === activePropertyId) {
         notificationService.showToast(`🔔 Tienes un paquete de ${pkg.company} esperándote en portería.`, 'info');
       }
     };
@@ -414,6 +443,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         zone: reservation.commonZoneName,
         propertyId: reservation.propertyName || reservation.propertyNumber || reservation.propertyId,
         residentName: reservation.residentName || "Residente",
+        createdByUserId: reservation.createdByUserId || (reservation as any).createdByUser?.id,
         date: reservation.reservationDate || reservation.date,
         startTime: reservation.startTime,
         endTime: reservation.endTime,
@@ -427,8 +457,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (prev.some(r => r.id === mapped.id)) return prev;
         return [mapped, ...prev];
       });
-      // Invalidate query to refresh availability checks in modal
-      queryClient.invalidateQueries({ queryKey: ['reservations', 'availability'] });
+      // Invalidate query to refresh availability checks and reservation lists
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
     };
 
     const handleReservationUpdated = (e: any) => {
@@ -440,7 +470,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         observations: reservation.observations,
         adminNotes: reservation.adminNotes,
       } : r));
-      queryClient.invalidateQueries({ queryKey: ['reservations', 'availability'] });
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
     };
 
     window.addEventListener('RESERVATION_CREATED', handleReservationCreated);
@@ -499,9 +529,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
 
         if (isResident) {
-          const propertyUnit = user?.propertyUnit || 'Mi Apartamento';
-          const isPropietario = userProperties?.some(p => p.type?.toLowerCase().includes('propietario')) || false;
-          const isArrendatario = userProperties?.some(p => p.type?.toLowerCase().includes('arrendatario') || p.type?.toLowerCase().includes('inquilino')) || false;
+          // Fase 2 / E2: la unidad activa (sin user.propertyUnit) y las relaciones de cada unidad.
+          const activeU = userProperties?.find(p => p.propertyId === activePropertyId);
+          const relationsOf = (p: any): string[] => (p.relations?.length ? p.relations : [p.type]).filter(Boolean).map((t: string) => t.toLowerCase());
+          const isPropietario = userProperties?.some(p => relationsOf(p).some(t => t.includes('propietario'))) || false;
+          const isArrendatario = userProperties?.some(p => relationsOf(p).some(t => t.includes('arrendatario') || t.includes('inquilino'))) || false;
           
           let showToast = false;
           const aud = newComm.audience || 'Todos';
@@ -513,8 +545,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           } else if (aud === 'Arrendatarios' && isArrendatario) {
             showToast = true;
           } else if (aud !== 'Propietarios' && aud !== 'Arrendatarios') {
-            const targets = aud.split(',').map(s => s.trim());
-            if (targets.some(target => propertyUnit.includes(target))) {
+            // Fase 2 / E3: comparación exacta con la unidad activa ("Torre 1" no alcanza a "Torre 10").
+            if (audienceMatchesUnit(aud, activeU)) {
               showToast = true;
             }
           }
@@ -538,6 +570,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               id: pkg.id,
               tenantId: pkg.tenantId || tenantId,
               propertyId: pkg.propertyId, // Store the UUID
+              propertyNumber: pkg.propertyNumber,
+              propertyName: pkg.propertyName,
               recipientName: pkg.recipientName,
               trackingNumber: pkg.trackingNumber,
               company: pkg.company,
@@ -548,13 +582,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }));
             setPackages(mappedPkgs);
           }
-        } else if (user?.residentPropertyId) {
-          const myPkgsRes = await apiClient.get<any>(`/access/packages/by-property/${user.residentPropertyId}`);
+        } else if (activePropertyId) {
+          // Fase 2 / E2: paquetes de la unidad ACTIVA (antes: user.residentPropertyId, la unidad del login).
+          const myPkgsRes = await apiClient.get<any>(`/access/packages/by-property/${activePropertyId}`);
           if (isMounted && Array.isArray(myPkgsRes)) {
             const mappedPkgs: Package[] = myPkgsRes.map((pkg: any) => ({
               id: pkg.id,
               tenantId: pkg.tenantId || tenantId,
               propertyId: pkg.propertyId,
+              propertyNumber: pkg.propertyNumber,
+              propertyName: pkg.propertyName,
               recipientName: pkg.recipientName,
               trackingNumber: pkg.trackingNumber,
               company: pkg.company,
@@ -583,9 +620,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               documentId: v.documentId,
               status: (v.status === 'AUTHORIZED' || v.status === 'AUTORIZADO') ? 'APPROVED' : (v.status === 'PENDIENTE' ? 'PENDING' : (v.status === 'ENTERED' ? 'ENTERED' : (v.status === 'EXITED' ? 'EXITED' : (v.status === 'EXPIRADO' ? 'EXPIRED' : v.status)))),
               expectedAt: formatFriendlyDateTime(v.expectedAt),
-                enteredAt: formatFriendlyDateTime(v.enteredAt),
-                exitedAt: formatFriendlyDateTime(v.exitedAt),
-                createdAt: v.createdAt,
+              rawExpectedAt: v.expectedAt,
+              enteredAt: formatFriendlyDateTime(v.enteredAt),
+              exitedAt: formatFriendlyDateTime(v.exitedAt),
+              enteredByName: v.enteredByName || undefined,
+              exitedByName: v.exitedByName || undefined,
+              createdAt: v.createdAt,
               vehiclePlate: v.vehiclePlate,
               observations: v.observations,
               visitPurpose: v.visitPurpose,
@@ -599,8 +639,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setVisitors(mappedVis);
           }
         } else {
-          // Si es residente, consultar a través del servicio propio seguro
-          const myVis = await visitorService.getMyVisitors();
+          // Si es residente, consultar a través del servicio propio seguro, para la unidad ACTIVA (Fase 2 / E2).
+          // Sin unidad elegida no se consulta (el backend respondería 409 UNIT_SELECTION_REQUIRED).
+          const myVis = activePropertyId ? await visitorService.getMyVisitors(activePropertyId) : [];
           if (isMounted) {
             setVisitors(myVis);
           }
@@ -658,11 +699,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               commonZoneId: r.commonZoneId,
               commonZoneName: r.commonZoneName || "Zona Común",
               zone: r.commonZoneName || "Zona Común",
-              propertyId: r.propertyName || r.propertyNumber || r.propertyId,
+              propertyId: r.propertyId || r.propertyName || r.propertyNumber,
+              propertyName: r.propertyName,
+              propertyNumber: r.propertyNumber,
               residentName: r.residentName || "Residente",
+              createdByUserId: r.createdByUserId || (r as any).createdByUser?.id,
               date: r.reservationDate || r.date,
-              startTime: r.startTime,
-              endTime: r.endTime,
+              startTime: typeof r.startTime === 'string' ? r.startTime.substring(0, 5) : r.startTime,
+              endTime: typeof r.endTime === 'string' ? r.endTime.substring(0, 5) : r.endTime,
               status: r.status,
               totalCost: r.totalCost || 0,
               guestsCount: r.guestsCount || r.attendeesCount || 1,
@@ -676,7 +720,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       } else {
         try {
-          const propId = user?.residentPropertyId || (properties.length > 0 ? properties[0].id : null);
+          // Fase 2 / E2: solo la unidad activa; sin selección no se piden reservas de ninguna unidad.
+          const propId = activePropertyId;
           if (propId) {
             const resvRes = await apiClient.get<any[]>(`/reservations/by-property/${propId}`);
             if (isMounted && Array.isArray(resvRes)) {
@@ -686,11 +731,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 commonZoneId: r.commonZoneId,
                 commonZoneName: r.commonZoneName || "Zona Común",
                 zone: r.commonZoneName || "Zona Común",
-                propertyId: r.propertyName || r.propertyNumber || r.propertyId,
+                propertyId: r.propertyId || propId,
+                propertyName: r.propertyName,
+                propertyNumber: r.propertyNumber,
                 residentName: r.residentName || "Residente",
-                date: r.date || r.reservationDate,
-                startTime: r.startTime,
-                endTime: r.endTime,
+                createdByUserId: r.createdByUserId || (r as any).createdByUser?.id,
+                date: r.reservationDate || r.date,
+                startTime: typeof r.startTime === 'string' ? r.startTime.substring(0, 5) : r.startTime,
+                endTime: typeof r.endTime === 'string' ? r.endTime.substring(0, 5) : r.endTime,
                 status: r.status,
                 totalCost: r.totalCost || 0,
                 guestsCount: r.guestsCount || r.attendeesCount || 1,
@@ -764,11 +812,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       window.removeEventListener('DOCUMENT_CREATED', handleDocumentCreated);
       window.removeEventListener('COMMUNICATION_CREATED', handleCommunicationCreated);
     };
-  }, [tenantId, isAuthenticated, isResident, canViewCommunityPanic, user?.residentPropertyId]);
+  }, [tenantId, isAuthenticated, isResident, canViewCommunityPanic, activePropertyId, userProperties]);
 
 
+  // Fase 2 / E2 (D6): siempre la unidad activa; sin unidad, panicService rechaza sin enviar nada.
   const createEmergencyAlert = async (alertType: AlertType, notes?: string): Promise<PanicAlert> => {
-    const created = await panicService.createAlert(alertType, notes);
+    const created = await panicService.createAlert(alertType, notes, activePropertyId);
     return created;
   };
 
@@ -806,13 +855,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         id: res.id,
         tenantId: res.tenantId || tenantId,
         propertyId: res.propertyId || pkg.propertyId,
+        propertyNumber: res.propertyNumber || pkg.propertyNumber,
+        propertyName: res.propertyName || pkg.propertyName || prop?.path || prop?.name,
         recipientName: res.recipientName,
         trackingNumber: res.trackingNumber,
         company: res.company,
-          status: res.status,
-          receivedAt: formatFriendlyDateTime(res.receivedAt) || "Hoy",
-          deliveredAt: formatFriendlyDateTime(res.deliveredAt),
-          observations: res.observations
+        status: res.status,
+        receivedAt: formatFriendlyDateTime(res.receivedAt) || "Hoy",
+        deliveredAt: formatFriendlyDateTime(res.deliveredAt),
+        observations: res.observations
       };
       setPackages(prev => {
         if (prev.some(p => p.id === newPkg.id)) return prev;
@@ -847,6 +898,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           id: res.id,
           tenantId: res.tenantId || tenantId,
           propertyId: res.propertyId || pkg.propertyId,
+          propertyNumber: res.propertyNumber || pkg.propertyNumber,
+          propertyName: res.propertyName || pkg.propertyName || prop?.path || prop?.name,
           recipientName: res.recipientName,
           trackingNumber: res.trackingNumber,
           company: res.company,
@@ -874,9 +927,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setPackages(prev => prev.map(p => p.id === id ? { ...p, ...pkg } : p));
   };
 
-  const deletePackage = (id: string) => {
-    // There is no delete endpoint yet, fallback local
-    setPackages(prev => prev.filter(p => p.id !== id));
+  const deletePackage = async (id: string) => {
+    const pkg = packages.find(p => p.id === id);
+    if (pkg && pkg.status === 'DELIVERED') return;
+
+    setPackages(prev => prev.filter(p => !(p.id === id && p.status !== 'DELIVERED')));
+    try {
+      await apiClient.delete(`/access/packages/${id}`);
+    } catch (err) {
+      console.warn("No se pudo eliminar paquete en backend:", err);
+    }
   };
 
   const markPackageDelivered = async (id: string) => {
@@ -886,6 +946,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch (err) {
       console.warn("No se pudo marcar entrega en backend:", err);
     }
+  };
+
+  // Residente: endpoint propio (portería usa /deliver). Solo se marca entregado si el servidor lo confirma.
+  const confirmPackagePickup = async (id: string) => {
+    const res = await apiClient.post<any>(`/access/packages/${id}/confirm-pickup`);
+    setPackages(prev => prev.map(p => p.id === id ? {
+      ...p,
+      status: "DELIVERED",
+      deliveredAt: formatFriendlyDateTime(res?.deliveredAt || new Date().toISOString()),
+    } : p));
   };
 
   const deliverAllUnitPackages = async (propertyId: string) => {
@@ -904,12 +974,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const prop = properties.find(p => p.id === visitor.propertyId || p.name === visitor.propertyId || p.path === visitor.propertyId);
       const uuidPropertyId = prop ? prop.id : visitor.propertyId;
 
+      // Asegurar fecha y hora actual en formato ISO si viene vacía o con texto relativo ("Hoy...")
+      let isoExpectedAt: string = new Date().toISOString();
+      if (visitor.expectedAt && visitor.expectedAt.includes('T')) {
+        isoExpectedAt = visitor.expectedAt;
+      }
+
       const payload = {
         name: visitor.name,
         documentId: visitor.documentId,
         propertyId: uuidPropertyId,
         vehiclePlate: visitor.vehiclePlate || undefined,
-        expectedAt: visitor.expectedAt && visitor.expectedAt.includes('Hoy') ? undefined : visitor.expectedAt,
+        expectedAt: isoExpectedAt,
         observations: visitor.observations || undefined,
         visitPurpose: visitor.visitPurpose || 'Visita',
       };
@@ -918,17 +994,34 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const res = await apiClient.post<any>("/access/visitors?isPreAuthorized=false", payload);
 
       // Si en el formulario dijeron que ya ingresó, lo ingresamos
-      if (visitor.status === 'ENTERED' && res.id) {
+      if (visitor.status === 'ENTERED' && res?.id) {
         await apiClient.post(`/access/visitors/${res.id}/entry`);
       }
+
+      const createdVis: Visitor = {
+        id: res.id,
+        tenantId: res.tenantId || tenantId,
+        propertyId: res.propertyNumber || res.propertyId || visitor.propertyId,
+        name: res.name || visitor.name,
+        documentId: res.documentId || visitor.documentId,
+        status: visitor.status === 'ENTERED' ? 'ENTERED' : (res.status === 'AUTHORIZED' ? 'APPROVED' : (res.status || visitor.status)),
+        expectedAt: formatFriendlyDateTime(res.expectedAt || isoExpectedAt),
+        rawExpectedAt: res.expectedAt || isoExpectedAt,
+        enteredAt: visitor.status === 'ENTERED' ? formatFriendlyDateTime(new Date().toISOString()) : undefined,
+        createdAt: res.createdAt || new Date().toISOString(),
+        vehiclePlate: res.vehiclePlate || visitor.vehiclePlate,
+        observations: res.observations || visitor.observations,
+        visitPurpose: res.visitPurpose || visitor.visitPurpose,
+        qrCode: res.qrCode,
+        propertyName: res.propertyName,
+        residentName: res.residentName,
+      };
+      setVisitors(prev => [createdVis, ...prev.filter(v => v.id !== createdVis.id)]);
       
       return res;
     } catch (err) {
       console.error("Error al crear visitante en backend:", err);
-      // Fallback local
-      const newVis = { ...visitor, id: Date.now().toString() } as Visitor;
-      setVisitors(prev => [newVis, ...prev]);
-      return newVis;
+      throw err;
     }
   };
 
@@ -938,6 +1031,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Si es residente, persistir en backend de forma segura (sin IDOR)
     if (isResident) {
       try {
+        const unitForVisit = activePropertyId; // fijada al crear: todas las visitas del grupo van a la misma unidad
         const createdPromises = persons.map(p =>
           visitorService.createMyVisitor({
             name: p.name,
@@ -948,13 +1042,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             visitPurpose: visitDetails.visitPurpose || 'Visita',
             groupId: persons.length > 1 ? groupId : undefined,
             groupName: visitDetails.groupName || undefined,
-          })
+          }, unitForVisit)
         );
         const savedVisitors = await Promise.all(createdPromises);
-        setVisitors(prev => {
-          const newOnes = savedVisitors.filter(sv => !prev.some(v => v.id === sv.id));
-          return [...newOnes, ...prev];
-        });
+        // Si el SSE VISITOR_CREATED llegó antes que esta respuesta, se sustituye esa entrada.
+        setVisitors(prev => mergeCreatedVisitors(prev, savedVisitors));
         return savedVisitors;
       } catch (err) {
         console.error("Error al persistir visitas en backend:", err);
@@ -967,7 +1059,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return {
         id,
         tenantId,
-        propertyId: visitDetails.propertyId || user?.residentPropertyId,
+        propertyId: visitDetails.propertyId || activePropertyId || undefined,
         name: p.name,
         documentId: p.documentId,
         vehiclePlate: p.vehiclePlate || '',
@@ -1010,23 +1102,30 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setVisitors(prev => prev.map(v => v.id === id ? { ...v, status: 'CANCELLED' } : v));
     } else {
       setVisitors(prev => prev.map(v => v.id === id ? { ...v, status: 'CANCELLED' } : v));
+      try {
+        await apiClient.delete(`/access/visitors/${id}`);
+      } catch (err) {
+        console.warn("No se pudo cancelar visita en backend:", err);
+      }
     }
   };
   const recordVisitorEntry = async (id: string) => {
-    setVisitors(prev => prev.map(v => v.id === id ? { ...v, status: "ENTERED", enteredAt: new Date().toISOString() } : v));
     try {
-      await apiClient.post(`/access/visitors/${id}/entry`);
+      const res = await apiClient.post<any>(`/access/visitors/${id}/entry`);
+      setVisitors(prev => prev.map(v => (v.id === id || String(v.id).toLowerCase() === String(id).toLowerCase()) ? { ...v, status: "ENTERED", enteredAt: new Date().toISOString(), ...mergeStaffNames(v, res) } : v));
     } catch (err) {
       console.warn("No se pudo registrar ingreso en backend:", err);
+      throw err;
     }
   };
   const recordGroupEntry = (_groupId: string) => {};
   const recordVisitorExit = async (id: string) => {
-    setVisitors(prev => prev.map(v => v.id === id ? { ...v, status: "EXITED", exitedAt: new Date().toISOString() } : v));
     try {
-      await apiClient.post(`/access/visitors/${id}/exit`);
+      const res = await apiClient.post<any>(`/access/visitors/${id}/exit`);
+      setVisitors(prev => prev.map(v => (v.id === id || String(v.id).toLowerCase() === String(id).toLowerCase()) ? { ...v, status: "EXITED", exitedAt: new Date().toISOString(), ...mergeStaffNames(v, res) } : v));
     } catch (err) {
       console.warn("No se pudo registrar salida en backend:", err);
+      throw err;
     }
   };
 
@@ -1047,30 +1146,35 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const createReservation = async (resv: Omit<Reservation, "id">) => {
     try {
-      // Find the UUID for the property
-      const prop = properties.find(p => p.id === resv.propertyId || p.name === resv.propertyId || p.path === resv.propertyId);
-      const uuidPropertyId = prop ? prop.id : resv.propertyId;
-
-      // Find the UUID for the zone
-      const zone = commonZones.find(z => z.id === resv.commonZoneId || z.name === resv.zone);
-      const uuidZoneId = zone ? zone.id : resv.commonZoneId;
-
-      let finalPropertyId = uuidPropertyId;
-
-      // Fallback for demo residents with missing or invalid propertyId
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      // 1. Resolve Property UUID
+      // Fase 2 / E2: sin fallbacks a la primera unidad. Residente: la unidad activa. Administración: la unidad
+      // elegida (id, o coincidencia EXACTA de nombre o ruta); si no se identifica, la reserva no se crea.
+      let finalPropertyId = resv.propertyId;
       if (!finalPropertyId || !uuidRegex.test(finalPropertyId)) {
-        if (properties.length > 0) {
-          finalPropertyId = properties[0].id;
+        if (isResident) {
+          finalPropertyId = activePropertyId && uuidRegex.test(activePropertyId) ? activePropertyId : '';
         } else {
-          console.error(`Invalid Property UUID: ${finalPropertyId}`);
-          throw new Error("ID de inmueble inválido");
+          const prop = properties.find(
+            p => p.id === resv.propertyId || p.name === resv.propertyId || p.path === resv.propertyId
+          );
+          finalPropertyId = prop?.id || '';
         }
       }
 
+      if (!finalPropertyId || !uuidRegex.test(finalPropertyId)) {
+        console.error(`Invalid Property UUID: ${finalPropertyId}`);
+        throw new Error("No se pudo identificar la propiedad asociada para la reserva.");
+      }
+
+      // 2. Resolve Zone UUID
+      const zone = commonZones.find(z => z.id === resv.commonZoneId || z.name === resv.zone);
+      const uuidZoneId = zone?.id || resv.commonZoneId;
+
       if (!uuidZoneId || !uuidRegex.test(uuidZoneId)) {
         console.error(`Invalid Zone UUID: ${uuidZoneId}`);
-        throw new Error("ID de zona inválido");
+        throw new Error("Zona común no válida o no encontrada en el sistema.");
       }
 
       const payload = {
@@ -1088,27 +1192,29 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const newResv: Reservation = {
         id: response.id,
         tenantId: response.tenantId || tenantId,
-        commonZoneId: response.commonZoneId,
+        commonZoneId: response.commonZoneId || uuidZoneId,
+        commonZoneName: response.commonZoneName || resv.zone,
         zone: response.commonZoneName || resv.zone,
-        propertyId: response.propertyName || response.propertyNumber || resv.propertyId,
+        propertyId: response.propertyId || finalPropertyId,
+        propertyName: response.propertyName,
+        propertyNumber: response.propertyNumber,
         residentName: response.residentName || resv.residentName,
-        date: response.date,
-        startTime: response.startTime,
-        endTime: response.endTime,
-        status: response.status || 'Pendiente', // Defaults to Pendiente from backend
+        createdByUserId: response.createdByUserId || user?.id,
+        date: response.reservationDate || response.date || resv.date,
+        startTime: typeof response.startTime === 'string' ? response.startTime.substring(0, 5) : resv.startTime,
+        endTime: typeof response.endTime === 'string' ? response.endTime.substring(0, 5) : resv.endTime,
+        status: response.status || 'PENDING',
         totalCost: response.totalCost || 0,
-        guestsCount: response.attendeesCount || response.guestsCount,
-        observations: response.observations,
+        guestsCount: response.guestsCount || response.attendeesCount || resv.guestsCount,
+        observations: response.observations || resv.observations,
       };
 
-      setReservations(prev => [newResv, ...prev]);
+      setReservations(prev => [newResv, ...prev.filter(r => r.id !== newResv.id)]);
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
       return newResv;
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error creating reservation in backend:", err);
-      // Fallback local memory
-      const newResv = { ...resv, status: 'PENDING', id: Date.now().toString() } as Reservation;
-      setReservations(prev => [newResv, ...prev]);
-      return newResv;
+      throw err;
     }
   };
   const updateReservation = async (id: string, resv: Partial<Reservation>) => {
@@ -1116,18 +1222,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // NOTA: El endpoint puede variar según el backend, pero asumiremos PUT /reservations/{id}
       await apiClient.put(`/reservations/${id}`, resv);
       setReservations(prev => prev.map(r => r.id === id ? { ...r, ...resv } : r));
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
     } catch (err) {
       console.error("Error al actualizar reserva en el backend:", err);
       setReservations(prev => prev.map(r => r.id === id ? { ...r, ...resv } : r));
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
     }
   };
   const deleteReservation = async (id: string) => {
     try {
       await apiClient.delete(`/reservations/${id}`);
       setReservations(prev => prev.filter(r => r.id !== id));
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
     } catch (err) {
       console.error("Error al eliminar reserva en el backend:", err);
       setReservations(prev => prev.filter(r => r.id !== id));
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
     }
   };
   const changeReservationStatus = async (id: string, status: Reservation["status"], notes?: string) => {
@@ -1141,15 +1251,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         await apiClient.post(`/reservations/${id}/${endpoint}${query}`);
       }
       setReservations(prev => prev.map(r => r.id === id ? { ...r, status, adminNotes: notes ?? r.adminNotes } : r));
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
     } catch (err) {
       console.error("Error al cambiar estado de reserva en el backend:", err);
       // Fallback a actualización local si el backend falla
       setReservations(prev => prev.map(r => r.id === id ? { ...r, status, adminNotes: notes ?? r.adminNotes } : r));
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
     }
   };
 
   const createCommunication = async (comm: Omit<Communication, "id" | "createdAt">) => {
-    const newComm = { ...comm, id: Date.now().toString(), createdAt: "Hoy" } as Communication;
+    const newComm = { ...comm, id: Date.now().toString(), createdAt: new Date().toISOString() } as Communication;
     setCommunications(prev => [newComm, ...prev]);
     
     try {
@@ -1248,6 +1360,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         updatePackage,
         deletePackage,
         markPackageDelivered,
+        confirmPackagePickup,
         deliverAllUnitPackages,
         createVisitor,
         createGroupVisit,

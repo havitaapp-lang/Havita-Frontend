@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { Car, PawPrint, Plus, Trash2, AlertCircle, Users, Copy, CheckCircle2, QrCode, CornerDownRight, History, UserCheck, RotateCcw, Home, UserCog, ChevronRight } from "lucide-react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Car, PawPrint, Plus, Trash2, Edit3, X, AlertCircle, Users, Copy, CheckCircle2, QrCode, CornerDownRight, History, UserCheck, RotateCcw, Home, UserCog, ChevronRight } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { residentSelfService } from "../../services/residentSelfService";
 import type {
@@ -9,7 +9,9 @@ import type {
 import type { Vehicle, Pet } from "../../types";
 import { notificationService } from "../../services/notificationService";
 import { useAuth } from "../../contexts/AuthContext";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useActiveUnit } from "../../hooks/useActiveUnit";
+import { apiErrorCode } from "../../api/apiClient";
 import { FIELD_LIMITS } from "../../validation/rules/limits";
 import { formatPlateInput } from "../../utils/formatters";
 
@@ -17,7 +19,11 @@ const VEHICLE_TYPES = ["Automóvil", "Camioneta", "Moto", "Bicicleta", "Otro"];
 const PET_TYPES = ["Perro", "Gato", "Ave", "Reptil", "Otro"];
 
 export const ResidentMyHome = () => {
-  const { user, activePropertyId } = useAuth() as any;
+  const { user } = useAuth() as any;
+  // Fase 2 / E2: única fuente de la unidad. Cada consulta y operación usa ESTA unidad explícitamente (cabecera fijada
+  // al iniciar la petición); la página se reinicia al cambiar de unidad (ResidentLayout).
+  const { activeUnitId: activePropertyId } = useActiveUnit();
+  const queryClient = useQueryClient();
 
   // --- Personas ---
   
@@ -30,7 +36,8 @@ export const ResidentMyHome = () => {
 
   const { data: people = [], isLoading: loadingPeople, refetch: loadPeople } = useQuery({
     queryKey: ['myPeople', activePropertyId],
-    queryFn: residentSelfService.getMyPeople
+    queryFn: () => residentSelfService.getMyPeople(activePropertyId),
+    enabled: !!activePropertyId
   });
 
   const { data: votingDelegation, refetch: loadVotingDelegation } = useQuery({
@@ -74,7 +81,10 @@ export const ResidentMyHome = () => {
     return false;
   };
 
+  // Cierre E3: un solo envío a la vez; el estado se vuelve a leer del backend solo si la delegación se creó.
+  const delegatingRef = useRef(false);
   const handleDelegateVote = async () => {
+    if (delegatingRef.current) return;
     const confirmed = await notificationService.showConfirm(
       '¿Delegar derecho de voto?',
       'El arrendatario podrá votar en representación de esta unidad en las asambleas de la comunidad mientras mantengas esta autorización.\n\nAl delegar el voto, tú dejarás de poder votar por esta unidad.',
@@ -83,32 +93,50 @@ export const ResidentMyHome = () => {
     );
     if (!confirmed) return;
 
+    if (!activePropertyId) return;
+    delegatingRef.current = true;
     try {
       const { delegateVote } = await import('../../services/votingDelegationService');
       await delegateVote(activePropertyId);
       notificationService.showToast('Derecho de voto delegado exitosamente', 'success');
       loadVotingDelegation();
     } catch (err: any) {
-      notificationService.showToast(err.response?.data?.message || 'Error al delegar voto', 'error');
+      // No se muestra éxito ni se cambia el estado local; no se reintenta.
+      const message = apiErrorCode(err) === 'DELEGATION_BLOCKED_BY_ATTENDANCE'
+        ? 'No puedes delegar el voto de esta unidad porque ya tiene asistencia registrada en una asamblea programada o en curso.'
+        : (err?.message || 'Error al delegar voto');
+      notificationService.showToast(message, 'error');
+    } finally {
+      delegatingRef.current = false;
     }
   };
 
+  // Fase 2 / E5 (D9): un solo envío a la vez; si el backend rechaza la revocación no se muestra éxito, no se cambia el
+  // estado local y no se reintenta.
+  const revokingRef = useRef(false);
   const handleRevokeVote = async () => {
+    if (revokingRef.current) return;
     const confirmed = await notificationService.showConfirm(
       '¿Revocar derecho de voto?',
       'El arrendatario dejará de poder votar en representación de esta unidad. Tú recuperarás el derecho de voto para las próximas votaciones.',
       'Revocar delegación',
       'Cancelar'
     );
-    if (!confirmed) return;
+    if (!confirmed || !activePropertyId) return;
 
+    revokingRef.current = true;
     try {
       const { revokeVote } = await import('../../services/votingDelegationService');
       await revokeVote(activePropertyId);
       notificationService.showToast('Derecho de voto revocado exitosamente', 'success');
       loadVotingDelegation();
     } catch (err: any) {
-      notificationService.showToast(err.response?.data?.message || 'Error al revocar voto', 'error');
+      const message = apiErrorCode(err) === 'DELEGATION_REVOCATION_BLOCKED_BY_ATTENDANCE'
+        ? 'No puedes revocar esta delegación porque el delegado ya tiene asistencia registrada en una asamblea programada o en curso.'
+        : (err?.message || 'Error al revocar voto'); // p. ej. DELEGATION_GRANTED_BY_OTHER_OWNER: el mensaje real del backend
+      notificationService.showToast(message, 'error');
+    } finally {
+      revokingRef.current = false;
     }
   };
 
@@ -128,7 +156,7 @@ export const ResidentMyHome = () => {
     if (!confirmed) return;
 
     try {
-      await residentSelfService.terminatePerson(person.id);
+      await residentSelfService.terminatePerson(person.id, activePropertyId);
       notificationService.showToast(
         isTargetTenant ? 'Arrendatario y accesos dependientes removidos exitosamente' : 'Acceso revocado exitosamente',
         'success'
@@ -176,7 +204,7 @@ export const ResidentMyHome = () => {
 
     setReactivatingId(person.id);
     try {
-      await residentSelfService.reactivatePerson(person.id);
+      await residentSelfService.reactivatePerson(person.id, activePropertyId);
       notificationService.showToast('Acceso reactivado exitosamente', 'success');
       loadPeople();
     } catch (err: any) {
@@ -192,10 +220,24 @@ export const ResidentMyHome = () => {
 
   
   
+  // SEC-7: el backend ya no devuelve enlaces en el listado; quien emitio la invitacion genera uno nuevo.
+  const handleRegenerateInvitation = async (id: string) => {
+    if (!await notificationService.showConfirm('¿Generar un nuevo enlace?', 'El enlace anterior dejará de funcionar. Comparte el nuevo con la persona invitada.', 'Sí, generar', 'Volver')) return;
+    try {
+      const res = await residentSelfService.regenerateInvitation(id, activePropertyId);
+      setGeneratedLink(res.link);
+      setShowPersonForm(true);
+      await loadPeople();
+      notificationService.showToast('Nuevo enlace generado', 'success');
+    } catch (err: any) {
+      notificationService.showError('Error', err?.message || 'No se pudo generar el nuevo enlace');
+    }
+  };
+
   const handleCancelInvitation = async (id: string) => {
     if (!await notificationService.showConfirm('¿Cancelar invitación?', '¿Estás seguro de cancelar esta invitación? El enlace dejará de funcionar.', 'Sí, cancelar', 'Volver')) return;
     try {
-      await residentSelfService.cancelInvitation(id);
+      await residentSelfService.cancelInvitation(id, activePropertyId);
       notificationService.showToast('Invitación cancelada', 'success');
       loadPeople();
     } catch {
@@ -208,9 +250,9 @@ export const ResidentMyHome = () => {
     setSavingPerson(true);
     try {
       // Omitimos name, email y phone, solo enviamos type
-      const res = await residentSelfService.inviteResident({ name: "", email: "", phone: "", type: personForm.type, propertyId: activePropertyId || user?.residentPropertyId });
+      const res = await residentSelfService.inviteResident({ name: "", email: "", phone: "", type: personForm.type, propertyId: activePropertyId }, activePropertyId);
       await loadPeople();
-      setGeneratedLink(res.link || res.inviteLink || (window.location.origin + "/register/invite/" + res.tokenHash));
+      setGeneratedLink(res.link);
       notificationService.showToast("Invitación generada", "success");
     } catch (err: any) {
       notificationService.showError("Error", err?.message || "No se pudo invitar");
@@ -230,6 +272,7 @@ export const ResidentMyHome = () => {
   // ─── Vehículos ──────────────────────────────────────────────────────────────
   
   const [showVehicleForm, setShowVehicleForm] = useState(false);
+  const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
   const [vehicleForm, setVehicleForm] = useState<ResidentCreateVehicleDto>({
     plate: "",
     type: "Automóvil",
@@ -242,6 +285,7 @@ export const ResidentMyHome = () => {
   // ─── Mascotas ────────────────────────────────────────────────────────────────
   
   const [showPetForm, setShowPetForm] = useState(false);
+  const [editingPetId, setEditingPetId] = useState<string | null>(null);
   const [petForm, setPetForm] = useState<ResidentCreatePetDto>({
     name: "",
     type: "Perro",
@@ -254,12 +298,14 @@ export const ResidentMyHome = () => {
   // ─── Carga inicial ───────────────────────────────────────────────────────────
   const { data: vehicles = [], isLoading: loadingVehicles, refetch: loadVehicles } = useQuery({
     queryKey: ['myVehicles', activePropertyId],
-    queryFn: residentSelfService.getMyVehicles
+    queryFn: () => residentSelfService.getMyVehicles(activePropertyId),
+    enabled: !!activePropertyId
   });
 
   const { data: pets = [], isLoading: loadingPets, refetch: loadPets } = useQuery({
     queryKey: ['myPets', activePropertyId],
-    queryFn: residentSelfService.getMyPets
+    queryFn: () => residentSelfService.getMyPets(activePropertyId),
+    enabled: !!activePropertyId
   });
 
   
@@ -270,19 +316,39 @@ export const ResidentMyHome = () => {
     if (!vehicleForm.plate?.trim()) return;
     setSavingVehicle(true);
     try {
-      const created = await residentSelfService.addMyVehicle({
+      const data = {
         ...vehicleForm,
         plate: vehicleForm.plate.toUpperCase(),
-      });
+      };
+      if (editingVehicleId) {
+        await residentSelfService.updateMyVehicle(editingVehicleId, data, activePropertyId);
+        notificationService.showToast("Vehículo actualizado exitosamente", "success");
+      } else {
+        await residentSelfService.addMyVehicle(data, activePropertyId);
+        notificationService.showToast("Vehículo registrado exitosamente", "success");
+      }
       loadVehicles();
       setVehicleForm({ plate: "", type: "Automóvil", brand: "", model: "", color: "" });
       setShowVehicleForm(false);
-      notificationService.showToast("Vehículo registrado exitosamente", "success");
+      setEditingVehicleId(null);
     } catch (err: any) {
-      notificationService.showError("Error", err?.message || "No se pudo registrar el vehículo");
+      notificationService.showError("Error", err?.message || "No se pudo guardar el vehículo");
     } finally {
       setSavingVehicle(false);
     }
+  };
+
+  const handleEditVehicleClick = (vehicle: Vehicle) => {
+    setVehicleForm({
+      plate: vehicle.plate,
+      type: vehicle.type,
+      brand: vehicle.brand,
+      model: vehicle.model,
+      color: vehicle.color,
+      parkingSpot: vehicle.parkingSpot,
+    });
+    setEditingVehicleId(vehicle.id);
+    setShowVehicleForm(true);
   };
 
   const handleDeleteVehicle = async (vehicle: Vehicle) => {
@@ -295,8 +361,10 @@ export const ResidentMyHome = () => {
     if (!confirmed) return;
 
     try {
-      await residentSelfService.deleteMyVehicle(vehicle.id);
-      // setVehicles((prev) => prev.filter((v) => v.id !== vehicle.id));
+      await residentSelfService.deleteMyVehicle(vehicle.id, activePropertyId);
+      // Quitarlo de la caché al confirmar el backend y volver a leer la lista persistida.
+      queryClient.setQueryData<Vehicle[]>(['myVehicles', activePropertyId], (prev) => prev?.filter((v) => v.id !== vehicle.id));
+      loadVehicles();
       notificationService.showToast("Vehículo eliminado", "success");
     } catch {
       notificationService.showError("Error", "No se pudo eliminar el vehículo");
@@ -309,16 +377,34 @@ export const ResidentMyHome = () => {
     if (!petForm.name?.trim()) return;
     setSavingPet(true);
     try {
-      const created = await residentSelfService.addMyPet(petForm);
+      if (editingPetId) {
+        await residentSelfService.updateMyPet(editingPetId, petForm, activePropertyId);
+        notificationService.showToast("Mascota actualizada exitosamente", "success");
+      } else {
+        await residentSelfService.addMyPet(petForm, activePropertyId);
+        notificationService.showToast("Mascota registrada exitosamente", "success");
+      }
       loadPets();
       setPetForm({ name: "", type: "Perro", breed: "", color: "", isDangerousBreed: false });
       setShowPetForm(false);
-      notificationService.showToast("Mascota registrada exitosamente", "success");
+      setEditingPetId(null);
     } catch (err: any) {
-      notificationService.showError("Error", err?.message || "No se pudo registrar la mascota");
+      notificationService.showError("Error", err?.message || "No se pudo guardar la mascota");
     } finally {
       setSavingPet(false);
     }
+  };
+
+  const handleEditPetClick = (pet: Pet) => {
+    setPetForm({
+      name: pet.name,
+      type: pet.type,
+      breed: pet.breed,
+      color: pet.color,
+      isDangerousBreed: pet.isDangerousBreed,
+    });
+    setEditingPetId(pet.id);
+    setShowPetForm(true);
   };
 
   const handleDeletePet = async (pet: Pet) => {
@@ -331,8 +417,10 @@ export const ResidentMyHome = () => {
     if (!confirmed) return;
 
     try {
-      await residentSelfService.deleteMyPet(pet.id);
-      // setPets((prev) => prev.filter((p) => p.id !== pet.id));
+      await residentSelfService.deleteMyPet(pet.id, activePropertyId);
+      // Quitarla de la caché al confirmar el backend y volver a leer la lista persistida.
+      queryClient.setQueryData<Pet[]>(['myPets', activePropertyId], (prev) => prev?.filter((p) => p.id !== pet.id));
+      loadPets();
       notificationService.showToast("Mascota eliminada", "success");
     } catch {
       notificationService.showError("Error", "No se pudo eliminar la mascota");
@@ -566,7 +654,9 @@ export const ResidentMyHome = () => {
                               }
                             </p>
                           </div>
-                          {p.isSelf && hasActiveTenant && (
+                          {/* Cierre E5 / D14: con una delegación vigente se puede revocar aunque el arrendatario ya no esté activo
+                              (antes el botón desaparecía y la delegación quedaba sin poder revocarse desde el portal). */}
+                          {p.isSelf && (hasActiveTenant || votingDelegation) && (
                             votingDelegation ? (
                               <button
                                 onClick={handleRevokeVote}
@@ -742,25 +832,13 @@ export const ResidentMyHome = () => {
                           </div>
 
                           <div className="flex items-center gap-1">
-                            {inv.inviteLink && (
+                            {inv.canRegenerate && (
                               <button
-                                onClick={() => {
-                                  setGeneratedLink(inv.inviteLink);
-                                  setShowPersonForm(true);
-                                }}
+                                onClick={() => handleRegenerateInvitation(inv.id)}
                                 className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
-                                title="Ver Código QR"
+                                title="Generar nuevo enlace"
                               >
-                                <QrCode className="w-4 h-4" />
-                              </button>
-                            )}
-                            {inv.inviteLink && (
-                              <button
-                                onClick={() => copyToClipboard(inv.inviteLink)}
-                                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer"
-                                title="Copiar enlace"
-                              >
-                                {copiedLink === inv.inviteLink ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                                <RotateCcw className="w-4 h-4" />
                               </button>
                             )}
                             {canRemovePerson(inv) && (
@@ -845,7 +923,7 @@ export const ResidentMyHome = () => {
             </div>
           </div>
           <button
-            onClick={() => setShowVehicleForm((v) => !v)}
+            onClick={() => { if(!showVehicleForm) { setVehicleForm({ plate: "", type: "Automóvil", brand: "", model: "", color: "" }); setEditingVehicleId(null); } setShowVehicleForm((v) => !v); }}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-semibold rounded-full transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -856,7 +934,7 @@ export const ResidentMyHome = () => {
         {/* Formulario nuevo vehículo */}
         {showVehicleForm && (
           <form onSubmit={handleAddVehicle} className="px-5 py-4 bg-blue-50/40 border-b border-blue-100">
-            <p className="text-xs font-semibold text-slate-600 mb-3">Nuevo vehículo</p>
+            <div className="flex items-center justify-between mb-3"><p className="text-xs font-semibold text-slate-600">{editingVehicleId ? "Editar vehículo" : "Nuevo vehículo"}</p><button type="button" onClick={() => { setShowVehicleForm(false); setEditingVehicleId(null); setVehicleForm({ plate: "", type: "Automóvil", brand: "", model: "", color: "" }); }} className="p-1 text-slate-400 hover:text-slate-600 rounded-full transition-colors"><X className="w-4 h-4" /></button></div>
             <div className="grid grid-cols-2 gap-2.5">
               <div className="col-span-2">
                 <input
@@ -900,7 +978,7 @@ export const ResidentMyHome = () => {
             <div className="flex gap-2 mt-3">
               <button
                 type="button"
-                onClick={() => setShowVehicleForm(false)}
+                onClick={() => { setShowVehicleForm(false); setEditingVehicleId(null); setVehicleForm({ plate: "", type: "Automóvil", brand: "", model: "", color: "" }); }}
                 className="flex-1 py-2 text-xs font-semibold text-slate-500 border border-slate-200 rounded-full hover:bg-slate-50 transition-colors"
               >
                 Cancelar
@@ -935,13 +1013,7 @@ export const ResidentMyHome = () => {
                     {v.parkingSpot && ` · P.${v.parkingSpot}`}
                   </p>
                 </div>
-                <button
-                  onClick={() => handleDeleteVehicle(v)}
-                  className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-colors"
-                  title="Eliminar vehículo"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex gap-1"><button onClick={() => handleEditVehicleClick(v)} className="p-2 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-xl transition-colors" title="Editar vehículo"><Edit3 className="w-4 h-4" /></button><button onClick={() => handleDeleteVehicle(v)} className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-colors" title="Eliminar vehículo"><Trash2 className="w-4 h-4" /></button></div>
               </div>
             ))
           )}
@@ -972,7 +1044,7 @@ export const ResidentMyHome = () => {
         {/* Formulario nueva mascota */}
         {showPetForm && (
           <form onSubmit={handleAddPet} className="px-5 py-4 bg-amber-50/40 border-b border-amber-100">
-            <p className="text-xs font-semibold text-slate-600 mb-3">Nueva mascota</p>
+            <div className="flex items-center justify-between mb-3"><p className="text-xs font-semibold text-slate-600">{editingPetId ? "Editar mascota" : "Nueva mascota"}</p><button type="button" onClick={() => { setShowPetForm(false); setEditingPetId(null); setPetForm({ name: "", type: "Perro", breed: "", color: "", isDangerousBreed: false }); }} className="p-1 text-slate-400 hover:text-slate-600 rounded-full transition-colors"><X className="w-4 h-4" /></button></div>
             <div className="grid grid-cols-2 gap-2.5">
               <div className="col-span-2">
                 <input
@@ -1026,7 +1098,7 @@ export const ResidentMyHome = () => {
             <div className="flex gap-2 mt-3">
               <button
                 type="button"
-                onClick={() => setShowPetForm(false)}
+                onClick={() => { setShowPetForm(false); setEditingPetId(null); setPetForm({ name: "", type: "Perro", breed: "", color: "", isDangerousBreed: false }); }}
                 className="flex-1 py-2 text-xs font-semibold text-slate-500 border border-slate-200 rounded-full hover:bg-slate-50 transition-colors"
               >
                 Cancelar
@@ -1065,13 +1137,7 @@ export const ResidentMyHome = () => {
                     {p.type} {p.breed && `· ${p.breed}`} {p.color && `· ${p.color}`}
                   </p>
                 </div>
-                <button
-                  onClick={() => handleDeletePet(p)}
-                  className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-colors"
-                  title="Eliminar mascota"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex gap-1"><button onClick={() => handleEditPetClick(p)} className="p-2 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-xl transition-colors" title="Editar mascota"><Edit3 className="w-4 h-4" /></button><button onClick={() => handleDeletePet(p)} className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-colors" title="Eliminar mascota"><Trash2 className="w-4 h-4" /></button></div>
               </div>
             ))
           )}

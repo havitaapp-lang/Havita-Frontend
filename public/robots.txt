@@ -1,0 +1,11 @@
+# https://www.robotstxt.org/robotstxt.html
+User-agent: *
+Allow: /
+Allow: /legal/
+Disallow: /admin/
+Disallow: /resident/
+Disallow: /security/
+Disallow: /super-admin/
+Disallow: /api/
+
+Sitemap: https://havita.com.co/sitemap.xml

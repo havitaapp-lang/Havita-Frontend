@@ -30,12 +30,46 @@ export function normalizePhone(phone: string): string {
   return (hasPlus ? '+' : '') + digits.slice(0, 20);
 }
 
+/** Regla común de teléfono (la misma que valida el backend): 7–20 caracteres, dígitos, espacios, guiones y + inicial. */
+export const PHONE_PATTERN = /^\+?[0-9 -]{7,20}$/;
+
+/**
+ * Mientras se escribe un teléfono: descarta letras y símbolos, conserva dígitos, espacios y guiones, y un '+' solo al
+ * principio; máximo 20 caracteres.
+ */
+export function sanitizePhoneInput(value: string): string {
+  if (!value) return '';
+  const plus = value.trimStart().startsWith('+') ? '+' : '';
+  const rest = value.replace(/[^0-9 -]/g, '').replace(/ {2,}/g, ' ').trimStart();
+  return (plus + rest).slice(0, 20);
+}
+
+/** ¿Es un teléfono válido según la regla común? (espacios repetidos o en los extremos no cuentan). */
+export function isValidPhone(value: string): boolean {
+  return PHONE_PATTERN.test((value ?? '').trim().replace(/\s+/g, ' '));
+}
+
 /**
  * Colapsa espacios en blanco repetidos a un solo espacio y hace trim.
  */
 export function normalizeWhitespace(text: string): string {
   if (!text) return '';
   return text.trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Normaliza texto multilínea: preserva saltos de línea intencionales,
+ * recorta espacios al final de cada línea, colapsa 3 o más saltos seguidos a 2,
+ * y elimina caracteres de control.
+ */
+export function normalizeMultilineText(text: string): string {
+  if (!text) return '';
+  return sanitizeText(text)
+    .split('\n')
+    .map(line => line.trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 /**

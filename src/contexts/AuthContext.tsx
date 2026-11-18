@@ -1,23 +1,35 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import type { User, Role } from '../types';
 import { setSSOCookie, getSSOCookie, removeSSOCookie } from '../utils/cookieUtils';
 import { apiClient } from '../api/apiClient';
+import { pushNotificationService } from '../services/pushNotificationService';
+import {
+  activeUnitStore,
+  dedupeUnits,
+  resolveSelection,
+  UNIT_SELECTION_REQUIRED_EVENT,
+  UNIT_UNAVAILABLE_EVENT,
+} from '../features/resident/unit/activeUnitStore';
+import type { ResidentUnit, UnitStatus } from '../features/resident/unit/activeUnitStore';
 
-export interface ResidentProperty {
-  propertyId: string;
-  number: string;
-  name: string;
-  type: string;
-  status: string;
-}
+/** Unidad autorizada del residente (contrato de GET /resident/me/properties, Fase 2 / E1). */
+export type ResidentProperty = ResidentUnit;
+
+export const UNIT_UNAVAILABLE_MESSAGE =
+  'La unidad que tenías seleccionada ya no está disponible para tu cuenta. Elige otra de tus unidades para continuar.';
 
 interface AuthContextProps {
+  /** Unidades autorizadas (una entrada por unidad, en el orden del backend). */
   userProperties: ResidentProperty[];
+  /** Unidad activa de ESTA pestaña (Fase 2 / E2): usar `useActiveUnit()` en los componentes. */
   activePropertyId: string | null;
   switchProperty: (propertyId: string) => void;
   isSwitchingProperty: boolean;
   refreshProperties: () => void;
+  unitStatus: UnitStatus;
+  unitNotice: string | null;
+  dismissUnitNotice: () => void;
   user: User | null;
   login: (email: string, password: string, tenantId?: string) => Promise<User>;
   loginAs: (role: Role, tenantId: string, tenantSubdomain?: string) => Promise<void>;
@@ -31,21 +43,21 @@ const AuthContext = createContext<AuthContextProps | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [userProperties, setUserProperties] = useState<ResidentProperty[]>([]);
-  const [activePropertyId, _setActivePropertyId] = useState<string | null>(() => localStorage.getItem('havita_active_property'));
+  const [unitStatus, setUnitStatus] = useState<UnitStatus>('idle');
+  const [unitNotice, setUnitNotice] = useState<string | null>(null);
   const [isSwitchingProperty, setIsSwitchingProperty] = useState(false);
-  const setActivePropertyId = (id: string | null) => {
-    setIsSwitchingProperty(true);
-    setTimeout(() => setIsSwitchingProperty(false), 500);
-    _setActivePropertyId(id);
-    if (id) localStorage.setItem('havita_active_property', id);
-    else localStorage.removeItem('havita_active_property');
-  };
+  // Fase 2 / E2: la unidad activa vive en activeUnitStore (una por pestaña, por usuario y comunidad).
+  const activePropertyId = useSyncExternalStore(activeUnitStore.subscribe, activeUnitStore.getActiveUnitId, () => null);
+  const unitsRef = useRef<ResidentProperty[]>([]);
+  const loadSeq = useRef(0);
 
   const [user, setUser] = useState<User | null>(() => {
     const savedCookie = getSSOCookie('havita_user');
     if (savedCookie) {
       try {
-        return JSON.parse(decodeURIComponent(savedCookie));
+        const u = JSON.parse(decodeURIComponent(savedCookie));
+        if (u?.avatar && u.avatar.includes('pravatar')) delete u.avatar;
+        return u;
       } catch {
         return null;
       }
@@ -53,7 +65,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const saved = localStorage.getItem('havita_user');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const u = JSON.parse(saved);
+        if (u?.avatar && u.avatar.includes('pravatar')) delete u.avatar;
+        return u;
       } catch {
         return null;
       }
@@ -61,25 +75,103 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return null;
   });
 
+  const userRef = useRef<User | null>(user);
   useEffect(() => {
-    if (user && user.role === 'RESIDENT' && userProperties.length === 0) {
-      const token = localStorage.getItem('havita_access_token');
-      if (token) {
-        apiClient.get('/resident/me/properties').then((data: any) => {
-          if (data && Array.isArray(data)) {
-            setUserProperties(data);
-            
-            const savedActiveProperty = localStorage.getItem('havita_active_property');
-            const propertyExists = data.some(p => p.propertyId === savedActiveProperty);
-            
-            if (data.length > 0 && (!savedActiveProperty || !propertyExists)) {
-              setActivePropertyId(data[0].propertyId);
-            }
-          }
-        }).catch(console.error);
-      }
-    }
+    userRef.current = user;
   }, [user]);
+
+  /**
+   * Fase 2 / E2 (D1): carga las unidades AUTORIZADAS y decide la unidad activa de esta pestaña:
+   * la selección de la pestaña si sigue siendo válida; si hay una sola unidad, esa; si no, la preferencia guardada para
+   * esta cuenta y comunidad si sigue siendo válida; si no, ninguna (se pide elegir). Nunca la primera de la lista.
+   * Un error al cargar NO cierra la sesión (eso solo lo deciden ACCESS_REVOKED / 401 en apiClient).
+   */
+  const loadUnits = useCallback(async (forUser: User | null) => {
+    if (!forUser || forUser.role !== 'RESIDENT') {
+      unitsRef.current = [];
+      setUserProperties([]);
+      setUnitStatus('idle');
+      return;
+    }
+    activeUnitStore.setScope({ userId: String(forUser.id), tenantId: String(forUser.tenantId || 'sin-comunidad') });
+    const seq = ++loadSeq.current;
+    if (unitsRef.current.length === 0) setUnitStatus('loading');
+    try {
+      const data = await apiClient.get<ResidentProperty[]>('/resident/me/properties');
+      if (seq !== loadSeq.current) return; // respuesta tardía de una carga anterior
+      const units = Array.isArray(data) ? dedupeUnits(data) : [];
+      unitsRef.current = units;
+      setUserProperties(units);
+      const preferred = activeUnitStore.getPreferredUnitId();
+      if (preferred && !units.some((u) => u.propertyId === preferred)) activeUnitStore.forgetPreference();
+      // La unidad que esta pestaña tenía activa ya no está autorizada (revocada por la administración o el SSE): se
+      // avisa, aunque no haya habido un 409, en vez de cambiar de unidad sin decir nada.
+      const previous = activeUnitStore.getActiveUnitId();
+      if (previous && !units.some((u) => u.propertyId === previous)) setUnitNotice(UNIT_UNAVAILABLE_MESSAGE);
+      const { unitId, status } = resolveSelection(units, previous, preferred);
+      activeUnitStore.setActiveUnitId(unitId);
+      setUnitStatus(status);
+    } catch (e) {
+      if (seq !== loadSeq.current) return;
+      console.warn('No se pudieron cargar las unidades del residente:', e);
+      setUnitStatus('error');
+    }
+  }, []);
+
+  // Carga (o limpia) las unidades al cambiar de usuario, rol o comunidad; nunca hereda la unidad de otra cuenta.
+  // (logout ya vacía la lista; aquí solo se carga para un residente con sesión).
+  const unitScopeKey = user ? `${user.id}|${user.role}|${user.tenantId ?? ''}` : '';
+  useEffect(() => {
+    const current = userRef.current ?? user;
+    if (current && current.role === 'RESIDENT' && localStorage.getItem('havita_access_token')) {
+      loadUnits(current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- se recarga solo si cambian cuenta, rol o comunidad
+  }, [unitScopeKey, loadUnits]);
+
+  // P8-B: con sesión, configura el service worker y vuelve a registrar la suscripción push de ESTE dispositivo si ESTE
+  // usuario la activó antes (nunca pide permiso por sí mismo). Reactiva el aviso tras cerrar y abrir sesión.
+  const pushSyncKey = user ? `${user.id}|${user.tenantId ?? ''}` : '';
+  useEffect(() => {
+    if (!pushSyncKey || !localStorage.getItem('havita_access_token')) return;
+    void pushNotificationService.syncSubscription(pushSyncKey.split('|')[0]);
+  }, [pushSyncKey]);
+
+  // 409 del resolvedor de unidades (apiClient): la sesión sigue siendo válida; se invalida la unidad y se refresca la
+  // lista. No se reintenta ninguna operación con otra unidad.
+  useEffect(() => {
+    const onUnavailable = (e: Event) => {
+      const unitId = (e as CustomEvent<{ unitId: string | null }>).detail?.unitId ?? null;
+      const active = activeUnitStore.getActiveUnitId();
+      if (unitId && unitId === active) {
+        activeUnitStore.setActiveUnitId(null);
+        if (activeUnitStore.getPreferredUnitId() === unitId) activeUnitStore.forgetPreference();
+        setUnitNotice(UNIT_UNAVAILABLE_MESSAGE);
+      }
+      loadUnits(userRef.current);
+    };
+    const onSelectionRequired = () => {
+      loadUnits(userRef.current);
+    };
+    window.addEventListener(UNIT_UNAVAILABLE_EVENT, onUnavailable);
+    window.addEventListener(UNIT_SELECTION_REQUIRED_EVENT, onSelectionRequired);
+    return () => {
+      window.removeEventListener(UNIT_UNAVAILABLE_EVENT, onUnavailable);
+      window.removeEventListener(UNIT_SELECTION_REQUIRED_EVENT, onSelectionRequired);
+    };
+  }, [loadUnits]);
+
+  /** Selección explícita del usuario (solo entre las unidades autorizadas); se recuerda como preferencia. */
+  const switchProperty = useCallback((propertyId: string) => {
+    if (!unitsRef.current.some((u) => u.propertyId === propertyId)) return;
+    if (propertyId !== activeUnitStore.getActiveUnitId()) {
+      setIsSwitchingProperty(true);
+      setTimeout(() => setIsSwitchingProperty(false), 500);
+    }
+    activeUnitStore.setActiveUnitId(propertyId, true);
+    setUnitStatus('ready');
+    setUnitNotice(null);
+  }, []);
 
   const login = async (email: string, password: string, tenantId?: string): Promise<User> => {
     const res = await fetch('/api/v1/auth/login', {
@@ -107,7 +199,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       email: data.user.email,
       role: data.user.role as Role,
       propertyUnit: data.user.propertyUnit,
-      avatar: 'https://i.pravatar.cc/150?u=' + data.user.role,
+      avatar: data.user.avatar || undefined,
       residentPropertyId: data.user.residentPropertyId,
       hasCompletedOnboarding: data.user.hasCompletedOnboarding ?? false,
       memberships: data.user.memberships || [],
@@ -122,21 +214,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       localStorage.setItem('havita_refresh_token', data.refreshToken);
     }
     localStorage.setItem('havita_user', JSON.stringify(loggedUser));
+    // Fase 2 / E2: la nueva sesión no hereda la unidad de la anterior (ni la clave global antigua).
+    activeUnitStore.clear();
+    unitsRef.current = [];
+    setUserProperties([]);
+    setUnitNotice(null);
     setUser(loggedUser);
 
     if (loggedUser.role === 'RESIDENT') {
-      try {
-        const propsData: any = await apiClient.get('/resident/me/properties');
-        if (propsData && Array.isArray(propsData)) {
-          setUserProperties(propsData);
-          if (propsData.length > 0) {
-            const propId = loggedUser.residentPropertyId || propsData[0].propertyId;
-            setActivePropertyId(propId);
-          }
-        }
-      } catch (e) {
-        console.error('Failed to load resident properties', e);
-      }
+      await loadUnits(loggedUser);
     }
 
     return loggedUser;
@@ -152,32 +238,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await login(demoEmail, 'Password123!', tenantId);
   };
 
-  const refreshProperties = async () => {
-    try {
-      const data = await apiClient.get('/resident/me/properties');
-      if (data && Array.isArray(data)) {
-        setUserProperties(data);
-        const currentActive = localStorage.getItem('havita_active_property');
-        if (data.length === 0) {
-          setActivePropertyId(null);
-          logout();
-          window.dispatchEvent(new CustomEvent('auth:access_revoked'));
-          return;
-        } else if (!data.find(p => p.propertyId === currentActive)) {
-          setActivePropertyId(data[0].propertyId);
-        }
-      }
-    } catch (e) {
-      console.warn('Error refreshing properties, evicting session:', e);
-      logout();
-      window.dispatchEvent(new CustomEvent('auth:access_revoked'));
-    }
+  /**
+   * Fase 2 / E2: vuelve a pedir las unidades autorizadas. Perder UNA unidad no cierra la sesión: si quedan otras se
+   * sigue con ellas (la activa se reemplaza solo si era la perdida). La revocación total la señalan el backend
+   * (ACCESS_REVOKED / 401, que gestiona apiClient) o el SSE con el usuario en affectedUserIds.
+   */
+  const refreshProperties = () => {
+    void loadUnits(userRef.current);
   };
 
   const logout = () => {
+    // P8-B: este dispositivo deja de recibir avisos push de la cuenta. Las credenciales se capturan ANTES de borrarlas;
+    // la revocación es asíncrona y nunca bloquea el cierre de sesión.
+    void pushNotificationService.revokeCurrentDevice(pushNotificationService.captureAuth());
     setUser(null);
+    unitsRef.current = [];
     setUserProperties([]);
-    setActivePropertyId(null);
+    setUnitStatus('idle');
+    setUnitNotice(null);
+    activeUnitStore.clear();
     removeSSOCookie('havita_access_token');
     removeSSOCookie('havita_refresh_token');
     removeSSOCookie('havita_user');
@@ -201,7 +280,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, userProperties, activePropertyId, switchProperty: setActivePropertyId, isSwitchingProperty, login, loginAs, logout, isAuthenticated: !!user, completeOnboarding, updateUser, refreshProperties }}>
+    <AuthContext.Provider value={{ user, userProperties, activePropertyId, switchProperty, isSwitchingProperty, login, loginAs, logout, isAuthenticated: !!user, completeOnboarding, updateUser, refreshProperties, unitStatus, unitNotice, dismissUnitNotice: () => setUnitNotice(null) }}>
       {children}
     </AuthContext.Provider>
   );

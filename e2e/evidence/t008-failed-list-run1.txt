@@ -1,0 +1,3 @@
+[chromium] › tests\residents\residents-my-home.spec.ts:122:3 › Mi Hogar · mascotas › registra, edita y elimina una mascota 
+[chromium] › tests\residents\residents-my-home.spec.ts:61:3 › Mi Hogar · vehículos › registra, edita y elimina un vehículo 
+[chromium] › tests\residents\residents-property-invitations.spec.ts:53:3 › Propiedades · invitación individual de residente › reabrir el modal muestra la invitación pendiente existente 

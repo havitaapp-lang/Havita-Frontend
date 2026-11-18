@@ -17,6 +17,7 @@ import { FIELD_LIMITS } from '../../validation/rules/limits';
 import { PropertySelectorModal } from './components/PropertySelectorModal';
 import { Building2 } from 'lucide-react';
 import { QRScanner } from './components/QRScanner';
+import { VisitorStaffTrail } from '../../components/visitors/VisitorStaffTrail';
 
 const ITEMS_PER_PAGE = 5;
 
@@ -33,6 +34,12 @@ export const SecurityVisitors = () => {
     return properties.filter((p) => p.tenantId === tenantId);
   }, [properties, tenantId]);
 
+  const getPropertyDisplay = (propertyId?: string, propertyNameFallback?: string) => {
+    if (!propertyId && !propertyNameFallback) return '';
+    const prop = tenantProperties.find(p => p.id === propertyId || p.path === propertyId || p.name === propertyId);
+    return prop?.path || prop?.name || propertyNameFallback || propertyId || '';
+  };
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTab, setFilterTab] = useState<'Todos' | 'APPROVED' | 'ENTERED' | 'EXITED'>('APPROVED');
   const [currentPage, setCurrentPage] = useState(1);
@@ -44,7 +51,7 @@ export const SecurityVisitors = () => {
   const [formData, setFormData] = useState({
     name: '',
     documentId: '',
-    propertyId: tenantProperties[0]?.name || 'Torre 1 - 101',
+    propertyId: tenantProperties[0] ? (tenantProperties[0].path || tenantProperties[0].name) : '',
     status: 'ENTERED' as Visitor['status'],
     expectedAt: 'Hoy',
     vehiclePlate: '',
@@ -118,7 +125,7 @@ export const SecurityVisitors = () => {
       documentId: '',
       propertyId: '',
       status: 'ENTERED',
-      expectedAt: 'Hoy, ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      expectedAt: new Date().toISOString(),
       vehiclePlate: '',
       observations: 'Registro directo en portería'
     });
@@ -171,25 +178,26 @@ export const SecurityVisitors = () => {
       await new Promise(r => setTimeout(r, 400));
 
       if (editingVisitor) {
-        updateVisitor(editingVisitor.id, {
+        await updateVisitor(editingVisitor.id, {
           ...normalized,
           status: formData.status,
-          expectedAt: formData.expectedAt,
+          expectedAt: formData.expectedAt || new Date().toISOString(),
         });
         notificationService.showToast('Visitante actualizado correctamente', 'success');
       } else {
-        createVisitor({
+        await createVisitor({
           ...normalized,
           status: formData.status,
-          expectedAt: formData.expectedAt,
+          expectedAt: formData.expectedAt || new Date().toISOString(),
           tenantId: currentTenant?.id || 'tenant-limonar'
         });
         notificationService.showToast('Visitante registrado con éxito', 'success');
       }
 
       setIsModalOpen(false);
-    } catch {
-      notificationService.showError('Error al guardar', 'No fue posible registrar al visitante.');
+    } catch (err: any) {
+      const msg = err?.message || err?.error || 'No fue posible registrar al visitante.';
+      notificationService.showError('Error al guardar', msg);
     } finally {
       setIsSubmitting(false);
     }
@@ -316,7 +324,7 @@ export const SecurityVisitors = () => {
                     <h4 className="font-bold text-slate-900 text-sm leading-snug">{vis.name}</h4>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
-                          {vis.propertyName || vis.propertyId}
+                          {getPropertyDisplay(vis.propertyId, vis.propertyName)}
                         </span>
                       <span className="text-xs text-slate-400 font-mono">
                           Doc: {vis.documentId}
@@ -332,11 +340,14 @@ export const SecurityVisitors = () => {
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
                     vis.status === 'ENTERED' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
                     vis.status === 'APPROVED' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                    vis.status === 'EXITED' ? 'bg-slate-50 text-slate-500 border border-slate-200' :
+                    vis.status === 'CANCELLED' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
                     'bg-slate-100 text-slate-600'
                   }`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${
                       vis.status === 'ENTERED' ? 'bg-emerald-500' :
-                      vis.status === 'APPROVED' ? 'bg-blue-500' : 'bg-slate-400'
+                      vis.status === 'APPROVED' ? 'bg-blue-500' :
+                      vis.status === 'CANCELLED' ? 'bg-rose-500' : 'bg-slate-400'
                     }`} />
                     {vis.status === 'ENTERED' ? 'Adentro' : vis.status === 'APPROVED' ? 'Esperado' : vis.status === 'EXITED' ? 'Salió' : vis.status === 'EXPIRED' ? 'Expirado' : vis.status === 'PENDING' ? 'Pendiente' : vis.status === 'CANCELLED' ? 'Cancelado' : vis.status}
                   </span>
@@ -361,15 +372,21 @@ export const SecurityVisitors = () => {
                       {vis.status === 'EXITED' && `Salió: ${formatTime(vis.exitedAt)}`}
                       {vis.status === 'APPROVED' && `Esperado: ${formatTime(vis.expectedAt)}`}
                     </span>
+                    <VisitorStaffTrail visitor={vis} className="mt-1" />
                   </div>
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                   {vis.status === 'APPROVED' && (
                     <button
-                      onClick={() => {
-                        recordVisitorEntry(vis.id);
-                        notificationService.showToast(`Ingreso registrado para ${vis.name}`, 'success');
+                      onClick={async () => {
+                        try {
+                          await recordVisitorEntry(vis.id);
+                          notificationService.showToast(`Ingreso registrado para ${vis.name}`, 'success');
+                        } catch (err: any) {
+                          const msg = err?.message || err?.error || `No se pudo registrar ingreso para ${vis.name}`;
+                          notificationService.showToast(msg, 'error');
+                        }
                       }}
                       className="flex-1 min-h-[40px] px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
                     >
@@ -379,9 +396,14 @@ export const SecurityVisitors = () => {
                   )}
                   {vis.status === 'ENTERED' && (
                     <button
-                      onClick={() => {
-                        recordVisitorExit(vis.id);
-                        notificationService.showToast(`Salida registrada para ${vis.name}`, 'success');
+                      onClick={async () => {
+                        try {
+                          await recordVisitorExit(vis.id);
+                          notificationService.showToast(`Salida registrada para ${vis.name}`, 'success');
+                        } catch (err: any) {
+                          const msg = err?.message || err?.error || `No se pudo registrar salida para ${vis.name}`;
+                          notificationService.showToast(msg, 'error');
+                        }
                       }}
                       className="flex-1 min-h-[40px] px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-xs"
                     >
@@ -443,8 +465,8 @@ export const SecurityVisitors = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4 font-medium text-slate-800">
-                        <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-xs">
-                          {vis.propertyName || vis.propertyId}
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-xs font-semibold text-slate-700">
+                          {getPropertyDisplay(vis.propertyId, vis.propertyName)}
                         </span>
                         {vis.residentName && (
                           <div className="text-[10px] text-slate-500 mt-1.5 font-normal ml-1">
@@ -467,6 +489,7 @@ export const SecurityVisitors = () => {
                         vis.status === 'ENTERED' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
                         vis.status === 'APPROVED' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
                         vis.status === 'EXITED' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                        vis.status === 'CANCELLED' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
                         vis.status === 'EXPIRED' ? 'bg-slate-50 text-slate-500 border border-slate-200' :
                         'bg-slate-100 text-slate-600'
                       }`}>
@@ -474,6 +497,7 @@ export const SecurityVisitors = () => {
                           vis.status === 'ENTERED' ? 'bg-emerald-500' :
                           vis.status === 'APPROVED' ? 'bg-blue-500' :
                           vis.status === 'EXITED' ? 'bg-rose-500' :
+                          vis.status === 'CANCELLED' ? 'bg-rose-500' :
                           vis.status === 'EXPIRED' ? 'bg-slate-400' :
                           'bg-slate-400'
                         }`} />
@@ -484,14 +508,20 @@ export const SecurityVisitors = () => {
                       {vis.status === 'ENTERED' && <div>Entró: {formatTime(vis.enteredAt)}</div>}
                       {vis.status === 'EXITED' && <div>Salió: {formatTime(vis.exitedAt)}</div>}
                       {vis.status === 'APPROVED' && <div>Esperado: {formatTime(vis.expectedAt)}</div>}
+                      <VisitorStaffTrail visitor={vis} className="mt-1" />
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         {vis.status === 'APPROVED' && (
                           <button
-                            onClick={() => {
-                              recordVisitorEntry(vis.id);
-                              notificationService.showToast(`Ingreso registrado para ${vis.name}`, 'success');
+                            onClick={async () => {
+                              try {
+                                await recordVisitorEntry(vis.id);
+                                notificationService.showToast(`Ingreso registrado para ${vis.name}`, 'success');
+                              } catch (err: any) {
+                                const msg = err?.message || err?.error || `No se pudo registrar ingreso para ${vis.name}`;
+                                notificationService.showToast(msg, 'error');
+                              }
                             }}
                             className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer flex items-center gap-1"
                           >
@@ -500,9 +530,14 @@ export const SecurityVisitors = () => {
                         )}
                         {vis.status === 'ENTERED' && (
                           <button
-                            onClick={() => {
-                              recordVisitorExit(vis.id);
-                              notificationService.showToast(`Salida registrada para ${vis.name}`, 'success');
+                            onClick={async () => {
+                              try {
+                                await recordVisitorExit(vis.id);
+                                notificationService.showToast(`Salida registrada para ${vis.name}`, 'success');
+                              } catch (err: any) {
+                                const msg = err?.message || err?.error || `No se pudo registrar salida para ${vis.name}`;
+                                notificationService.showToast(msg, 'error');
+                              }
                             }}
                             className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer flex items-center gap-1"
                           >
@@ -813,14 +848,19 @@ export const SecurityVisitors = () => {
                       <span className="font-bold text-slate-700">Integrantes ({scannedGroup.length}):</span>
                       {scannedGroup.some(v => v.status === 'APPROVED') && scannedGroup.length > 1 && (
                         <button
-                          onClick={() => {
-                            if (scannedGroup[0].groupId) {
-                              recordGroupEntry(scannedGroup[0].groupId);
-                            } else {
-                              scannedGroup.forEach(v => recordVisitorEntry(v.id));
+                          onClick={async () => {
+                            try {
+                              if (scannedGroup[0].groupId) {
+                                await recordGroupEntry(scannedGroup[0].groupId);
+                              } else {
+                                await Promise.all(scannedGroup.map(v => recordVisitorEntry(v.id)));
+                              }
+                              notificationService.showToast('Se registró el ingreso de todos los integrantes', 'success');
+                              setIsScannerOpen(false);
+                            } catch (err: any) {
+                              const msg = err?.message || err?.error || 'No se pudo registrar el ingreso';
+                              notificationService.showToast(msg, 'error');
                             }
-                            notificationService.showToast('Se registró el ingreso de todos los integrantes', 'success');
-                            setIsScannerOpen(false);
                           }}
                           className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1 cursor-pointer"
                         >
@@ -845,10 +885,15 @@ export const SecurityVisitors = () => {
                             </span>
                           ) : (
                             <button
-                              onClick={() => {
-                                recordVisitorEntry(member.id);
-                                notificationService.showToast(`Ingreso registrado: ${member.name}`, 'success');
-                                setScannedGroup(prev => prev ? prev.map(m => m.id === member.id ? { ...m, status: 'ENTERED' } : m) : null);
+                              onClick={async () => {
+                                try {
+                                  await recordVisitorEntry(member.id);
+                                  notificationService.showToast(`Ingreso registrado: ${member.name}`, 'success');
+                                  setScannedGroup(prev => prev ? prev.map(m => (m.id === member.id || String(m.id).toLowerCase() === String(member.id).toLowerCase()) ? { ...m, status: 'ENTERED' } : m) : null);
+                                } catch (err: any) {
+                                  const msg = err?.message || err?.error || `No se pudo registrar ingreso para ${member.name}`;
+                                  notificationService.showToast(msg, 'error');
+                                }
                               }}
                               className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors shrink-0 flex items-center gap-1 cursor-pointer"
                             >

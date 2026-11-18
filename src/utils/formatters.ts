@@ -259,3 +259,153 @@ export const COLOMBIAN_CITIES = [
   'Riohacha',
   'Yopal',
 ] as const;
+
+/**
+ * Normalizes and formats a property unit path into a standardized hierarchical path
+ * separated by hyphens: e.g. "Torre 1-Piso 5-Apto 1".
+ */
+export function formatFullUnitPath(
+  input?: {
+    path?: string | null;
+    propertyUnit?: string | null;
+    tower?: string | null;
+    propertyTower?: string | null;
+    level?: string | number | null;
+    floor?: string | number | null;
+    number?: string | null;
+    propertyNumber?: string | null;
+    name?: string | null;
+  } | string | null,
+  fallbackNumber?: string | null,
+  fallbackLevel?: string | number | null
+): string {
+  if (!input) return '';
+
+  let rawPath = '';
+  let tower = '';
+  let level = '';
+  let number = '';
+
+  if (typeof input === 'object') {
+    rawPath = (input.path || input.propertyUnit || '').trim();
+    tower = (input.tower || input.propertyTower || '').trim();
+    level = input.level !== undefined && input.level !== null
+      ? String(input.level).trim()
+      : (input.floor !== undefined && input.floor !== null ? String(input.floor).trim() : '');
+    number = (input.number || input.propertyNumber || input.name || '').trim();
+  } else {
+    const str = String(input).trim();
+    if (
+      str.includes('->') ||
+      str.includes('/') ||
+      str.includes('•') ||
+      (str.includes('-') && (
+        str.toLowerCase().includes('torre') ||
+        str.toLowerCase().includes('piso') ||
+        str.toLowerCase().includes('bloque') ||
+        str.toLowerCase().includes('casa')
+      ))
+    ) {
+      rawPath = str;
+    } else {
+      tower = str;
+    }
+    number = (fallbackNumber || '').trim();
+    level = fallbackLevel !== undefined && fallbackLevel !== null ? String(fallbackLevel).trim() : '';
+  }
+
+  // If rawPath is empty but number looks like a full composite path:
+  if (
+    !rawPath &&
+    number &&
+    (
+      number.includes('->') ||
+      number.includes('/') ||
+      number.includes('•') ||
+      (number.includes('-') && (
+        number.toLowerCase().includes('torre') ||
+        number.toLowerCase().includes('piso') ||
+        number.toLowerCase().includes('bloque') ||
+        number.toLowerCase().includes('casa')
+      ))
+    )
+  ) {
+    rawPath = number;
+  }
+
+  // 1. If we have a composite path (contains separators like '->', '•', '/', or ' - ')
+  if (rawPath) {
+    const rawSegments = rawPath
+      .split(/\s*(?:->|–|—|•|\/)\s*|\s*-\s*/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (rawSegments.length > 1) {
+      const normalizedSegments = rawSegments.map((seg, idx) => {
+        // Floor/Level normalization
+        if (idx === 1 && rawSegments.length >= 3) {
+          if (!seg.toLowerCase().startsWith('piso') && /^\d+$/.test(seg)) {
+            return `Piso ${seg}`;
+          }
+        }
+        // Unit normalization
+        if (idx === rawSegments.length - 1) {
+          if (
+            !seg.toLowerCase().startsWith('apto') &&
+            !seg.toLowerCase().startsWith('casa') &&
+            !seg.toLowerCase().startsWith('local') &&
+            !seg.toLowerCase().startsWith('oficina') &&
+            /^\w+$/.test(seg)
+          ) {
+            return `Apto ${seg}`;
+          }
+        }
+        return seg;
+      });
+
+      // If only 2 segments (e.g. ["Torre 1", "Apto 1"]) but level is known:
+      if (normalizedSegments.length === 2 && level) {
+        const cleanLevel = level.replace(/piso\s*/i, '').trim();
+        const levelStr = cleanLevel ? `Piso ${cleanLevel}` : '';
+        if (levelStr) {
+          return [normalizedSegments[0], levelStr, normalizedSegments[1]].join('-');
+        }
+      }
+
+      return normalizedSegments.join('-');
+    }
+  }
+
+  // 2. Build from constituent fields (tower, level, number)
+  const parts: string[] = [];
+  if (tower) {
+    parts.push(tower);
+  }
+  if (level) {
+    const cleanLevel = level.replace(/piso\s*/i, '').trim();
+    if (cleanLevel) {
+      parts.push(`Piso ${cleanLevel}`);
+    }
+  }
+  if (number) {
+    let cleanNum = number.trim();
+    const matchUnit = cleanNum.match(/(Apto\s*[\w\d]+|Casa\s*[\w\d]+|Local\s*[\w\d]+|Oficina\s*[\w\d]+)/i);
+    if (matchUnit) {
+      cleanNum = matchUnit[1];
+    } else {
+      const subParts = cleanNum.split(/[-–—/]/).map((s) => s.trim()).filter(Boolean);
+      cleanNum = subParts.length > 0 ? subParts[subParts.length - 1] : cleanNum;
+      if (
+        !cleanNum.toLowerCase().startsWith('apto') &&
+        !cleanNum.toLowerCase().startsWith('casa') &&
+        !cleanNum.toLowerCase().startsWith('local') &&
+        !cleanNum.toLowerCase().startsWith('oficina')
+      ) {
+        cleanNum = `Apto ${cleanNum}`;
+      }
+    }
+    parts.push(cleanNum);
+  }
+
+  return parts.length > 0 ? parts.join('-') : 'Unidad';
+}

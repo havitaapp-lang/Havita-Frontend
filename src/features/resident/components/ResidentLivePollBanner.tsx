@@ -1,19 +1,24 @@
 import { useState, useEffect } from 'react';
-import { ArrowRight, CheckCircle2 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { ArrowRight } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../../contexts/AuthContext';
+import { useActiveUnit } from '../../../hooks/useActiveUnit';
 import type { Poll } from '../../assemblies/types/assembly.types';
-import { pollService } from '../../assemblies/services/pollService';
+import { pollService, myVotingUnitsKey } from '../../assemblies/services/pollService';
 import { livePollService } from '../../assemblies/services/livePollService';
 import { ResidentVoteModal } from './ResidentVoteModal';
+import { ResidentPollVoteStatus } from './ResidentPollVoteStatus';
+import { useVotingSummary } from './useVotingSummary';
 
 export const ResidentLivePollBanner = () => {
-  const { user, activePropertyId } = useAuth() as any;
+  const { user } = useAuth() as any;
+  const { activeUnitId: activePropertyId, activeLabel } = useActiveUnit();
   const [livePoll, setLivePoll] = useState<Poll | null>(null);
   const [isVoteModalOpen, setIsVoteModalOpen] = useState(false);
-  const propertyUnit = user?.propertyUnit || 'Mi Apartamento';
+  const propertyUnit = activeLabel || 'Mi unidad';
   const residentName = user?.name || 'Residente';
   const propertyId = activePropertyId || '';
+  const queryClient = useQueryClient();
 
   const { data: initialPoll } = useQuery({
     queryKey: ['activeLivePoll'],
@@ -37,8 +42,6 @@ export const ResidentLivePollBanner = () => {
   }, []);
 
   if (!livePoll) return null;
-
-  const hasVoted = pollService.hasPropertyVoted(livePoll.id, propertyId);
 
   return (
     <>
@@ -65,13 +68,8 @@ export const ResidentLivePollBanner = () => {
             <p className="text-xs text-red-100/90 flex items-center gap-2 pt-0.5">
               <span>{livePoll.totalVotes} copropietarios participando</span>
               <span>•</span>
-              {hasVoted ? (
-                <span className="inline-flex items-center gap-1 font-bold text-white bg-black/20 px-2 py-0.5 rounded-md text-[11px]">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-300" /> Ya votaste
-                </span>
-              ) : (
-                <span className="font-bold text-yellow-200">¡Tu voto está pendiente!</span>
-              )}
+              {/* Fase 2 / E5: estado por unidad desde el backend (p. ej. «Votaste por 1 de 2 unidades · 1 pendiente»). */}
+              <ResidentPollVoteStatus pollId={livePoll.id} pollIsLive={livePoll.status === 'LIVE'} tone="banner" />
             </p>
           </div>
 
@@ -79,7 +77,7 @@ export const ResidentLivePollBanner = () => {
             type="button"
             className="px-4 py-2.5 bg-white text-red-700 font-black rounded-2xl text-xs flex items-center gap-2 shadow-md group-hover:bg-red-50 transition-colors whitespace-nowrap self-start sm:self-auto cursor-pointer"
           >
-            {hasVoted ? 'Ver Resultados' : 'Votar Ahora'}
+            <LivePollCta pollId={livePoll.id} />
             <ArrowRight className="w-3.5 h-3.5 text-red-700 group-hover:translate-x-0.5 transition-transform" />
           </button>
         </div>
@@ -92,8 +90,15 @@ export const ResidentLivePollBanner = () => {
         propertyId={propertyId}
         propertyUnit={propertyUnit}
         residentName={residentName}
+        onVoted={(id) => queryClient.invalidateQueries({ queryKey: myVotingUnitsKey(id) })}
       />
     </>
   );
 };
 
+
+/** Texto del botón según el estado de voto real (backend): «Votar Ahora» solo si alguna unidad puede votar. */
+function LivePollCta({ pollId }: { pollId: string }) {
+  const { summary } = useVotingSummary(pollId, true);
+  return <>{summary?.canVote ? 'Votar Ahora' : 'Ver Resultados'}</>;
+}

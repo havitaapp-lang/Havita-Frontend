@@ -54,7 +54,7 @@ export const PersonalDetailPage = () => {
       <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 shadow-2xs space-y-3">
         <p className="font-bold text-slate-800 text-sm">Colaborador no encontrado</p>
         <button
-          onClick={() => navigate('/admin/personal')}
+          onClick={() => navigate('/admin/staff')}
           className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors"
         >
           Volver al directorio
@@ -78,7 +78,7 @@ export const PersonalDetailPage = () => {
       {/* Top navigation */}
       <div className="flex items-center justify-between">
         <button
-          onClick={() => navigate('/admin/personal')}
+          onClick={() => navigate('/admin/staff')}
           className="flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-blue-600 transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />

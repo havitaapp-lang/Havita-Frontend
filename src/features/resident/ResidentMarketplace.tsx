@@ -15,6 +15,8 @@ import { Input } from '../../components/ui/Input';
 import { FormField } from '../../components/ui/FormField';
 import { SubmitButton } from '../../components/ui/SubmitButton';
 import { Skeleton } from '../../components/ui/Skeleton';
+import { isValidPhone, sanitizePhoneInput } from '../../utils/sanitizers';
+import { VALIDATION_MESSAGES } from '../../validation/messages/es';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -397,6 +399,7 @@ function CreateListingModal({ onClose, onSuccess }: { onClose: () => void; onSuc
     if (form.priceType !== 'CONTACT' && !form.price) e.price = 'El precio es obligatorio';
     if (form.price && isNaN(Number(form.price))) e.price = 'El precio debe ser numérico';
     if (!form.contactPhone.trim()) e.contactPhone = 'El teléfono de contacto es obligatorio';
+    else if (!isValidPhone(form.contactPhone)) e.contactPhone = VALIDATION_MESSAGES.INVALID_PHONE;
     if (!termsAccepted) e.terms = 'Debes aceptar los términos y condiciones';
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -566,11 +569,14 @@ function CreateListingModal({ onClose, onSuccess }: { onClose: () => void; onSuc
                   id="contactPhone"
                   value={form.contactPhone}
                   onChange={(e) => {
-                    setForm(f => ({ ...f, contactPhone: e.target.value }));
+                    setForm(f => ({ ...f, contactPhone: sanitizePhoneInput(e.target.value) }));
                     if (e.target.value) setErrors(err => ({ ...err, contactPhone: '' }));
                   }}
                   placeholder="Ej: 3001234567"
-                  maxLength={50}
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  maxLength={20}
                   className={errors.contactPhone ? 'border-red-300' : ''}
                 />
               </FormField>

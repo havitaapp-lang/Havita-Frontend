@@ -45,7 +45,7 @@ export const PersonalTable: React.FC<PersonalTableProps> = ({
               <tr
                 key={m.id}
                 className="hover:bg-blue-50/40 transition-colors group cursor-pointer"
-                onClick={() => navigate(`/admin/personal/${m.id}`)}
+                onClick={() => navigate(`/admin/staff/${m.id}`)}
               >
                 {/* Colaborador */}
                 <td className="py-3.5 px-4">
@@ -167,7 +167,7 @@ export const PersonalTable: React.FC<PersonalTableProps> = ({
                   <div className="flex items-center justify-end gap-1.5">
                     <button
                       type="button"
-                      onClick={() => navigate(`/admin/personal/${m.id}`)}
+                      onClick={() => navigate(`/admin/staff/${m.id}`)}
                       className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-blue-600 transition-colors cursor-pointer"
                       title="Ver perfil completo"
                     >

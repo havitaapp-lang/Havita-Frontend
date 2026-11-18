@@ -239,6 +239,14 @@ export const VisitorPassView = () => {
         <p className="text-[11px] text-slate-400">
           Presenta este código QR en la portería de la unidad residencial para validar tu ingreso.
         </p>
+
+        <p className="text-[10px] text-slate-400 border-t border-slate-100 pt-3">
+          Tus datos son tratados para control de acceso y seguridad por la copropiedad mediante Havita. Consulta el{' '}
+          <Link to="/legal/aviso-privacidad" target="_blank" className="underline hover:text-slate-600">
+            Aviso de Privacidad
+          </Link>
+          .
+        </p>
       </div>
     </div>
   );
